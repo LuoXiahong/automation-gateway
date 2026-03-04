@@ -1,7 +1,15 @@
-import { Telegraf, Context } from "telegraf";
+import { Telegraf, Context, Markup } from "telegraf";
 import { AppConfig } from "./config.js";
 import { HttpClient } from "./httpClient.js";
 import { AllowedChatRepository, UserStateRepository } from "./db.js";
+
+/** Callback data for menu buttons (prefix menu: to avoid collisions). */
+export const MENU_CB = {
+  IMPULS: "menu:impuls",
+  ALLOW_HERE: "menu:allow_here",
+  REVOKE_HERE: "menu:revoke_here",
+  ALLOWED_LIST: "menu:allowed_list",
+} as const;
 
 export interface BotDependencies {
   config: AppConfig;
@@ -164,6 +172,38 @@ export async function handleAllowedListCommand(
   );
 }
 
+const START_WELCOME =
+  "Witaj! Wybierz akcję z menu poniżej lub wpisz komendę (np. /impuls).";
+
+function getStartMenuKeyboard(isMaster: boolean): ReturnType<typeof Markup.inlineKeyboard> {
+  const rows: ReturnType<typeof Markup.button.callback>[][] = [
+    [Markup.button.callback("🧘 Złap dystans (Impuls)", MENU_CB.IMPULS)],
+  ];
+  if (isMaster) {
+    rows.push(
+      [
+        Markup.button.callback("✅ Allow here", MENU_CB.ALLOW_HERE),
+        Markup.button.callback("❌ Revoke here", MENU_CB.REVOKE_HERE),
+      ],
+      [Markup.button.callback("📋 Lista whitelist", MENU_CB.ALLOWED_LIST)],
+    );
+  }
+  return Markup.inlineKeyboard(rows);
+}
+
+export async function handleStartCommand(
+  ctx: Context,
+  deps: Pick<BotDependencies, "config">,
+): Promise<void> {
+  const fromId = ctx.from?.id;
+  if (!fromId) {
+    return;
+  }
+  const isMaster = fromId === deps.config.masterChatId;
+  const keyboard = getStartMenuKeyboard(isMaster);
+  await ctx.reply(START_WELCOME, keyboard);
+}
+
 export function createBot(deps: BotDependencies): Telegraf<Context> {
   const bot = new Telegraf<Context>(deps.config.telegramBotToken);
 
@@ -171,9 +211,41 @@ export function createBot(deps: BotDependencies): Telegraf<Context> {
     await authorizeContext(ctx, deps, next);
   });
 
+  bot.command("start", async (ctx) => {
+    await handleStartCommand(ctx, { config: deps.config });
+  });
+
   bot.command("impuls", async (ctx) => {
     await handleImpulsCommand(ctx, {
       userStateRepository: deps.userStateRepository,
+    });
+  });
+
+  bot.action(MENU_CB.IMPULS, async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleImpulsCommand(ctx, {
+      userStateRepository: deps.userStateRepository,
+    });
+  });
+  bot.action(MENU_CB.ALLOW_HERE, async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleAllowHereCommand(ctx, {
+      config: deps.config,
+      allowedChatRepository: deps.allowedChatRepository,
+    });
+  });
+  bot.action(MENU_CB.REVOKE_HERE, async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleRevokeHereCommand(ctx, {
+      config: deps.config,
+      allowedChatRepository: deps.allowedChatRepository,
+    });
+  });
+  bot.action(MENU_CB.ALLOWED_LIST, async (ctx) => {
+    await ctx.answerCbQuery();
+    await handleAllowedListCommand(ctx, {
+      config: deps.config,
+      allowedChatRepository: deps.allowedChatRepository,
     });
   });
 

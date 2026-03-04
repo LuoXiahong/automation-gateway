@@ -38,6 +38,7 @@ env/
 .idea/
 .vscode/
 .history/
+.cursor/
 
 ### Docker / Compose
 deploy/*.env

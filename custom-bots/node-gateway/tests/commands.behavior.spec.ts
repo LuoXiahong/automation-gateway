@@ -9,10 +9,13 @@ import {
   handleAllowHereCommand,
   handleImpulsCommand,
   handleRevokeHereCommand,
+  handleStartCommand,
+  MENU_CB,
 } from "../src/telegramBot";
 
 class FakeContext {
   public replies: string[] = [];
+  public replyExtra: unknown = null;
 
   constructor(public chatId: number, public fromId: number) {
     this.chat = { id: chatId };
@@ -22,8 +25,9 @@ class FakeContext {
   chat: { id: number };
   from: { id: number };
 
-  async reply(text: string): Promise<void> {
+  async reply(text: string, extra?: unknown): Promise<void> {
     this.replies.push(text);
+    this.replyExtra = extra ?? null;
   }
 }
 
@@ -121,6 +125,40 @@ describe("Bot command handlers", () => {
     expect(ctx.replies[0]).toContain("Aktualna whitelist'a czatów");
     expect(ctx.replies[0]).toContain("- 10");
     expect(ctx.replies[0]).toContain("- 20");
+  });
+
+  describe("handleStartCommand", () => {
+    it("Given /start by regular user, When invoked, Then sends welcome and menu with only Impuls button", async () => {
+      const ctx = new FakeContext(123, 999);
+
+      await handleStartCommand(ctx as unknown as Context, { config });
+
+      expect(ctx.replies[0]).toContain("Witaj!");
+      expect(ctx.replies[0]).toContain("Wybierz akcję");
+      type InlineBtn = { text?: string; callback_data?: string };
+      const markup = ctx.replyExtra as { reply_markup?: { inline_keyboard?: InlineBtn[][] } };
+      expect(markup?.reply_markup?.inline_keyboard).toBeDefined();
+      const rows = markup.reply_markup!.inline_keyboard!;
+      expect(rows).toHaveLength(1);
+      expect(rows[0][0]).toMatchObject({ text: expect.stringContaining("Impuls"), callback_data: MENU_CB.IMPULS });
+    });
+
+    it("Given /start by master, When invoked, Then sends welcome and menu with Impuls + admin buttons", async () => {
+      const ctx = new FakeContext(1, 1);
+
+      await handleStartCommand(ctx as unknown as Context, { config });
+
+      expect(ctx.replies[0]).toContain("Witaj!");
+      type InlineBtn = { callback_data?: string };
+      const markup = ctx.replyExtra as { reply_markup?: { inline_keyboard?: InlineBtn[][] } };
+      const rows = markup.reply_markup!.inline_keyboard!;
+      expect(rows.length).toBeGreaterThanOrEqual(2);
+      expect(rows[0][0]).toMatchObject({ callback_data: MENU_CB.IMPULS });
+      expect(rows[1].some((btn) => btn.callback_data === MENU_CB.ALLOW_HERE)).toBe(true);
+      expect(rows[1].some((btn) => btn.callback_data === MENU_CB.REVOKE_HERE)).toBe(true);
+      const listRow = rows.find((row) => row.some((btn) => btn.callback_data === MENU_CB.ALLOWED_LIST));
+      expect(listRow).toBeDefined();
+    });
   });
 });
 
