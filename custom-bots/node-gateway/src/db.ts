@@ -52,7 +52,7 @@ export function createUserStateRepository(pool: Pool): UserStateRepository {
         ON CONFLICT (user_id)
         DO UPDATE SET current_state = EXCLUDED.current_state, updated_at = NOW();
       `,
-        [userId, newState],
+        [userId, newState]
       );
     },
   };
@@ -63,7 +63,7 @@ export function createAllowedChatRepository(pool: Pool): AllowedChatRepository {
     async isAllowed(chatId: number): Promise<boolean> {
       const result = await pool.query<{ chat_id: string }>(
         "SELECT chat_id FROM allowed_chats WHERE chat_id = $1",
-        [chatId],
+        [chatId]
       );
       return result.rows.length > 0;
     },
@@ -75,22 +75,19 @@ export function createAllowedChatRepository(pool: Pool): AllowedChatRepository {
         VALUES ($1, NOW())
         ON CONFLICT (chat_id) DO NOTHING;
       `,
-        [chatId],
+        [chatId]
       );
     },
 
     async revokeChat(chatId: number): Promise<void> {
-      await pool.query("DELETE FROM allowed_chats WHERE chat_id = $1", [
-        chatId,
-      ]);
+      await pool.query("DELETE FROM allowed_chats WHERE chat_id = $1", [chatId]);
     },
 
     async listAllowedChats(): Promise<number[]> {
       const result = await pool.query<{ chat_id: string }>(
-        "SELECT chat_id FROM allowed_chats ORDER BY chat_id ASC",
+        "SELECT chat_id FROM allowed_chats ORDER BY chat_id ASC"
       );
       return result.rows.map((row) => Number(row.chat_id));
     },
   };
 }
-

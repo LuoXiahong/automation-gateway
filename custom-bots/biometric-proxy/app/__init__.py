@@ -1,2 +1,1 @@
 """Biometric proxy service package."""
-

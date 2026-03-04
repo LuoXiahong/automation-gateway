@@ -20,7 +20,7 @@ class Settings:
     stress_threshold: int
 
     @staticmethod
-    def from_env() -> "Settings":
+    def from_env() -> Settings:
         stress_threshold_raw = os.getenv("STRESS_ALERT_THRESHOLD", "70")
         try:
             stress_threshold = int(stress_threshold_raw)
@@ -34,4 +34,3 @@ class Settings:
             node_gateway_url=_require_env("NODE_GATEWAY_URL"),
             stress_threshold=stress_threshold,
         )
-

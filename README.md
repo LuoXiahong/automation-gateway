@@ -27,7 +27,7 @@ System jest zaprojektowany tak, aby:
 - `custom-bots/`
   - `node-gateway/` – gateway Telegram + internal API + state machine (TypeScript, Fastify, Telegraf, pg).
   - `biometric-proxy/` – proxy biometrów Garmin (Python, FastAPI, garminconnect).
-  - `example-bot/` – stary monolityczny bot (pozostawiony jako referencja / playground).
+  - Katalog `example-bot/` został usunięty; ostatni commit z jego zawartością: `ecbcfba2f55579382156957859adda8b7550f8ff` (jako referencja w historii Git).
 - `deploy/`
   - `docker-compose.yml` – przepis na cały zestaw usług:
     - `postgres` dla n8n i stanów użytkownika,
@@ -237,6 +237,17 @@ Dzięki temu:
   - Dockerfile build stage również używa komendy z coverage gate (`--cov-fail-under=60`),
   - 100% pokrycia dla logiki decyzyjnej (`DecisionWorker`) i parsera stresu, sensowne minimum dla reszty (config / main / http client).
 
+### Lint i formatowanie
+
+- **Node Gateway (ESLint + Prettier)**:
+  - `cd custom-bots/node-gateway && npm run lint` — sprawdzenie reguł,
+  - `npm run lint:fix` — automatyczne poprawki,
+  - `npm run format` — formatowanie kodu, `npm run format:check` — weryfikacja bez zapisu.
+- **Biometric Proxy (Ruff)**:
+  - `cd custom-bots/biometric-proxy && ruff check app tests` — lint,
+  - `ruff check app tests --fix` — automatyczne poprawki,
+  - `ruff format app tests` — formatowanie, `ruff format --check app tests` — weryfikacja.
+
 ## n8n-setup – automatyzacje + boty Telegram
 
 Repozytorium służy do wersjonowania infrastruktury pod:
@@ -262,8 +273,7 @@ Całość jest zaprojektowana tak, aby:
   - Tutaj trzymasz eksportowane workflowy n8n (`.json`).
   - Dzięki temu masz historię zmian w Gicie.
 - **`custom-bots/`**
-  - Miejsce na boty Telegram (np. Python, `python-telegram-bot`).
-  - `example-bot/` – minimalny bot / start do rozbudowy.
+  - Miejsce na boty Telegram i gateway (Node Gateway, Biometric Proxy). Katalog `example-bot/` usunięty; referencja w Git: `ecbcfba2f55579382156957859adda8b7550f8ff`.
 - **`deploy/`**
   - `docker-compose.yml` – przepis na cały zestaw usług:
     - `postgres` dla n8n,
@@ -358,8 +368,7 @@ Plik `.env` powinien pozostać **tylko lokalnie / na serwerze**. Do Gita commitu
    docker compose up -d telegram-bot
    ```
 
-3. W Telegramie wyślij do swojego bota komendę `/start`.  
-   W katalogu `custom-bots/example-bot/bot.py` możesz rozbudować logikę.
+3. W Telegramie wyślij do swojego bota komendę `/start`. Logikę bota rozbudowuj w `custom-bots/node-gateway/`.
 
 ---
 
@@ -448,9 +457,7 @@ Dzięki temu:
 ## Custom boty Telegram
 
 - Każdy bot trzyma swój kod w osobnym podkatalogu `custom-bots/<nazwa-bota>/`.
-- Minimalny przykład:
-  - `custom-bots/example-bot/Dockerfile`
-  - `custom-bots/example-bot/bot.py`
+- Obecne serwisy: `node-gateway/` (TypeScript) i `biometric-proxy/` (Python). Katalog `example-bot/` został usunięty (referencja: commit `ecbcfba2f55579382156957859adda8b7550f8ff`).
 - Aby dodać nowego bota:
   1. Utwórz nowy katalog w `custom-bots/`.
   2. Dodaj `Dockerfile` i kod bota.

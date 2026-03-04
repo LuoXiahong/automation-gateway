@@ -1,17 +1,21 @@
 import { Context } from "telegraf";
 import type { Response } from "node-fetch";
 import { AppConfig } from "../src/config";
-import { handleUserTextMessage } from "../src/telegramBot";
-import {
-  AllowedChatRepository,
-  UserStateRepository,
-} from "../src/db";
+import { handleUserTextMessage, handleUserVoiceMessage } from "../src/telegramBot";
+import { AllowedChatRepository, UserStateRepository } from "../src/db";
 import { HttpClient } from "../src/httpClient";
 
 interface TestContext {
   chat: { id: number };
   message: { text: string };
   reply: (text: string) => Promise<void>;
+}
+
+interface TestVoiceContext {
+  chat: { id: number };
+  message: { voice: { file_id: string } };
+  reply: (text: string) => Promise<void>;
+  telegram: { getFileLink: (fileId: string) => Promise<string> };
 }
 
 describe("User state behavior", () => {
@@ -67,11 +71,7 @@ describe("User state behavior", () => {
     }> = [];
 
     const httpClient: HttpClient = {
-      async post(
-        url: string,
-        body: unknown,
-        headers?: Record<string, string>,
-      ) {
+      async post(url: string, body: unknown, headers?: Record<string, string>) {
         postedPayloads.push({ url, body, headers });
         return { ok: true } as Response;
       },
@@ -189,5 +189,110 @@ describe("User state behavior", () => {
     expect(sentReplies.length).toBe(1);
     expect(sentReplies[0]).toContain("Spróbuj ponownie później");
   });
-});
 
+  it("Given user is in awaiting_plan state, When user sends a voice message, Then forward fileUrl to n8n and set state to default", async () => {
+    const sentReplies: string[] = [];
+    const fileUrl = "https://api.telegram.org/file/bot-token/voice/abc.ogg";
+    const fakeCtx: TestVoiceContext = {
+      chat: { id: 777 },
+      message: { voice: { file_id: "voice-file-123" } },
+      reply: async (text: string) => {
+        sentReplies.push(text);
+      },
+      telegram: {
+        getFileLink: async () => fileUrl,
+      },
+    };
+
+    const config: AppConfig = {
+      telegramBotToken: "test-token",
+      databaseUrl: "postgres://user:pass@localhost:5432/db",
+      internalApiKey: "internal-key",
+      n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      masterChatId: 1,
+    };
+
+    let storedState = "awaiting_plan";
+    const userStateRepository: UserStateRepository = {
+      async getUserState(userId: number): Promise<string> {
+        expect(userId).toBe(777);
+        return storedState;
+      },
+      async setUserState(userId: number, newState: string): Promise<void> {
+        expect(userId).toBe(777);
+        storedState = newState;
+      },
+    };
+
+    const postedPayloads: Array<{ url: string; body: unknown }> = [];
+    const httpClient: HttpClient = {
+      async post(url: string, body: unknown) {
+        postedPayloads.push({ url, body });
+        return { ok: true } as Response;
+      },
+    };
+
+    await handleUserVoiceMessage(fakeCtx as unknown as Context, {
+      config,
+      userStateRepository,
+      allowedChatRepository,
+      httpClient,
+    });
+
+    expect(postedPayloads).toHaveLength(1);
+    expect(postedPayloads[0].url).toBe(config.n8nWebhookUrl);
+    expect(postedPayloads[0].body).toEqual({
+      chatId: 777,
+      text: "[VOICE]",
+      fileUrl,
+    });
+    expect(storedState).toBe("default");
+    expect(sentReplies[0]).toContain("przekazuję Twój plan");
+  });
+
+  it("Given user is in awaiting_plan state and webhook fails, When user sends voice, Then do not reset state and inform user", async () => {
+    const sentReplies: string[] = [];
+    const fakeCtx: TestVoiceContext = {
+      chat: { id: 888 },
+      message: { voice: { file_id: "voice-456" } },
+      reply: async (text: string) => {
+        sentReplies.push(text);
+      },
+      telegram: { getFileLink: async () => "https://example.com/voice.ogg" },
+    };
+
+    const config: AppConfig = {
+      telegramBotToken: "test-token",
+      databaseUrl: "postgres://user:pass@localhost:5432/db",
+      internalApiKey: "internal-key",
+      n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      masterChatId: 1,
+    };
+
+    let storedState = "awaiting_plan";
+    const userStateRepository: UserStateRepository = {
+      async getUserState(): Promise<string> {
+        return storedState;
+      },
+      async setUserState(_, newState: string): Promise<void> {
+        storedState = newState;
+      },
+    };
+
+    const httpClient: HttpClient = {
+      async post() {
+        return { ok: false } as Response;
+      },
+    };
+
+    await handleUserVoiceMessage(fakeCtx as unknown as Context, {
+      config,
+      userStateRepository,
+      allowedChatRepository,
+      httpClient,
+    });
+
+    expect(storedState).toBe("awaiting_plan");
+    expect(sentReplies[0]).toContain("chwilowo niedostępny");
+  });
+});

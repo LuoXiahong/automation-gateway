@@ -155,4 +155,25 @@ describe("Internal APIs", () => {
       expect(updatedState.state).toBe("awaiting_plan");
     }
   });
+
+  it("Given stress alert with optional restingHeartRate, When calling stress-alert API, Then message includes resting heart rate", async () => {
+    allowedChats = [];
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/internal/stress-alert",
+      headers: {
+        "x-internal-api-key": "secret-key",
+        "content-type": "application/json",
+      },
+      payload: {
+        stressValue: 75,
+        restingHeartRate: 55,
+      },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(telegram.sent).toHaveLength(1);
+    expect(telegram.sent[0].text).toContain("75");
+    expect(telegram.sent[0].text).toContain("Tętno spoczynkowe: 55");
+  });
 });

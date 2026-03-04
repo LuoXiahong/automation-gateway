@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Optional
+from typing import Any
 
 import httpx
 
@@ -12,12 +12,10 @@ class AsyncHttpClient:
     async def post(
         self,
         url: str,
-        json: Dict[str, Any],
-        headers: Optional[Dict[str, str]] = None,
+        json: dict[str, Any],
+        headers: dict[str, str] | None = None,
     ) -> httpx.Response:
         return await self._client.post(url, json=json, headers=headers)
 
     async def aclose(self) -> None:
         await self._client.aclose()
-
-

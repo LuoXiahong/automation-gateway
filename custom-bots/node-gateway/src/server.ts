@@ -11,6 +11,7 @@ interface InternalMessageBody {
 
 interface StressAlertBody {
   stressValue: number;
+  restingHeartRate?: number;
 }
 
 export interface ServerDependencies {
@@ -56,41 +57,43 @@ export function createServer(deps: ServerDependencies): FastifyInstance {
       return reply.status(401).send({ error: "Unauthorized" });
     }
 
-    const { stressValue } = request.body;
+    const { stressValue, restingHeartRate } = request.body;
 
     if (typeof stressValue !== "number" || Number.isNaN(stressValue)) {
+      return reply.status(400).send({ error: "Invalid payload" });
+    }
+    if (
+      restingHeartRate !== undefined &&
+      (typeof restingHeartRate !== "number" || Number.isNaN(restingHeartRate))
+    ) {
       return reply.status(400).send({ error: "Invalid payload" });
     }
 
     const recipients = new Set<number>();
     recipients.add(deps.config.masterChatId);
 
-    const allowedChats =
-      await deps.allowedChatRepository.listAllowedChats();
+    const allowedChats = await deps.allowedChatRepository.listAllowedChats();
     for (const chatId of allowedChats) {
       recipients.add(chatId);
     }
 
-    const message =
+    let message =
       "Uwaga: wykryto podwyższony poziom stresu " +
       `(${stressValue}). Zatrzymaj się na chwilę, ` +
       "weź kilka spokojnych oddechów i rozważ, czy potrzebujesz zmienić plan dnia.";
+    if (restingHeartRate !== undefined) {
+      message += ` Tętno spoczynkowe: ${restingHeartRate}.`;
+    }
 
     await Promise.all(
       Array.from(recipients).map(async (chatId) => {
         await deps.bot.telegram.sendMessage(chatId, message);
-        await deps.userStateRepository.setUserState(
-          chatId,
-          "awaiting_plan",
-        );
-      }),
+        await deps.userStateRepository.setUserState(chatId, "awaiting_plan");
+      })
     );
 
-    return reply
-      .status(200)
-      .send({ status: "ok", recipients: Array.from(recipients) });
+    return reply.status(200).send({ status: "ok", recipients: Array.from(recipients) });
   });
 
   return app;
 }
-

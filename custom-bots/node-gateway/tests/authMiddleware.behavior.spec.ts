@@ -43,13 +43,9 @@ describe("Auth middleware", () => {
 
     let called = false;
 
-    await authorizeContext(
-      ctx,
-      { config, allowedChatRepository },
-      async () => {
-        called = true;
-      },
-    );
+    await authorizeContext(ctx, { config, allowedChatRepository }, async () => {
+      called = true;
+    });
 
     expect(called).toBe(false);
   });
@@ -62,13 +58,9 @@ describe("Auth middleware", () => {
 
     let called = false;
 
-    await authorizeContext(
-      ctx,
-      { config, allowedChatRepository },
-      async () => {
-        called = true;
-      },
-    );
+    await authorizeContext(ctx, { config, allowedChatRepository }, async () => {
+      called = true;
+    });
 
     expect(called).toBe(true);
   });
@@ -83,15 +75,10 @@ describe("Auth middleware", () => {
 
     let called = false;
 
-    await authorizeContext(
-      ctx,
-      { config, allowedChatRepository },
-      async () => {
-        called = true;
-      },
-    );
+    await authorizeContext(ctx, { config, allowedChatRepository }, async () => {
+      called = true;
+    });
 
     expect(called).toBe(true);
   });
 });
-

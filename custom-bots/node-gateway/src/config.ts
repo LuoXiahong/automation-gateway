@@ -31,4 +31,3 @@ function parseMasterChatId(raw: string): number {
   }
   return parsed;
 }
-

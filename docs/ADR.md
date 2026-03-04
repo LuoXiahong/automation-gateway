@@ -99,3 +99,53 @@
   - Komendy tekstowe nadal działają (backward compatibility).
   - Jedna źródłowa prawda dla logiki: przyciski i komendy korzystają z tych samych handlerów.
 
+---
+
+#### ADR-005: Rozszerzenie kontraktu stress-alert o restingHeartRate oraz cooldown 4h (antyspam alertów)
+
+- **Context**:
+  - Worker w `biometric-proxy` odpytuje Garmin co 15 minut; przy utrzymującym się stresie > progu wysyłał alert w każdej iteracji, co powodowało spam do użytkownika.
+  - Potrzeba wzbogacenia alertu o tętno spoczynkowe (resting heart rate) z Garmina dla lepszego kontekstu zdrowotnego w wiadomości alarmowej.
+  - Kontrakt `POST /api/internal/stress-alert` (ADR-003) przyjmował wyłącznie `stressValue`.
+- **Decision**:
+  - **Cooldown 4h (biometric-proxy):**
+    - W `DecisionWorker` wprowadzono stan in-memory `last_alert_time`. Alert jest wysyłany tylko gdy stres > próg **oraz** (`last_alert_time` jest `None` lub minęły 4 godziny od ostatniego alertu).
+    - Po udanym POST do node-gateway `last_alert_time` jest ustawiane na bieżący czas (UTC).
+    - Stała `COOLDOWN_PERIOD = timedelta(hours=4)`.
+  - **Kontrakt stress-alert (rozszerzenie):**
+    - Payload przyjmuje opcjonalne pole `restingHeartRate?: number`. Walidacja: jeśli podane, musi być liczbą (nie NaN).
+    - W `node-gateway` treść wiadomości alarmowej jest uzupełniana o „Tętno spoczynkowe: X” gdy `restingHeartRate` jest obecne.
+  - **biometric-proxy:**
+    - Provider stresu zwraca strukturę `StressSnapshot(stress_value, resting_heart_rate?)`. Dodano `_extract_resting_hr(raw)` w `main.py` do ekstrakcji RHR z surowej odpowiedzi Garmin (np. klucz `restingHeartRate`). Payload do `/api/internal/stress-alert` zawiera `restingHeartRate` tylko gdy wartość jest dostępna.
+- **Consequences**:
+  - Zmniejszenie irytującego spamu alertami przy długotrwałym wysokim stresie; użytkownik dostaje co najwyżej jeden alert na 4 godziny w takim samym epizodzie.
+  - Cooldown jest in-memory: restart kontenera `biometric-proxy` resetuje stan, więc pierwszy alert po restarcie może przyjść wcześniej niż po 4h od poprzedniego (akceptowalne).
+  - Kompatybilność wsteczna: brak `restingHeartRate` w payloadzie nadal jest poprawny; gateway nie wymaga tego pola.
+  - Testy BDD/jednostkowe po obu stronach (worker cooldown, parser RHR, endpoint z opcjonalnym RHR) weryfikują zachowanie i kontrakt.
+
+---
+
+#### ADR-006: ESLint + Prettier dla Node Gateway (TypeScript)
+
+- **Context**: Potrzeba spójnego lintu i formatowania w `node-gateway` bez wyciszeń reguł w kodzie.
+- **Decision**: Wprowadzono ESLint 9 (flat config) z `typescript-eslint` oraz Prettier. Reguły: recommended + `no-console` z zezwoleniem na `warn`/`error`. Konfiguracja Prettier (semi, double quotes, 100 znaków) w `.prettierrc`. Skrypty: `lint`, `lint:fix`, `format`, `format:check`.
+- **Consequences**: Jakość kodu egzekwowana w repo; brak `eslint-disable`/`noqa` — poprawki w kodzie (np. typowany dostęp do `AbortSignal.timeout`).
+
+---
+
+#### ADR-007: Ruff jako linter i formatter dla Pythona (biometric-proxy)
+
+- **Context**: Potrzeba nowoczesnego, jednego narzędzia do lintu i formatowania Pythona (2026 best practice).
+- **Decision**: Ruff (lint + format) w `pyproject.toml` z regułami: pycodestyle, Pyflakes, isort, pyupgrade, flake8-bugbear, comprehensions, simplify. Cel: Python 3.12, line-length 100. Zależność dodana do `requirements.txt`; konfiguracja w `[tool.ruff]` i `[tool.ruff.format]`.
+- **Consequences**: Jeden narzędzie zamiast wielu (Black, isort, flake8); szybkie sprawdzanie; brak `# noqa` — wszystkie zgłoszenia naprawione w kodzie.
+
+---
+
+#### ADR-008: Usunięcie example-bot, zachowanie zmiennych GEMINI
+
+- **Context**: Katalog `example-bot` był legacy; chęć uproszczenia repo przy zachowaniu możliwości użycia API Gemini w przyszłości.
+- **Decision**: Usunięto katalog `custom-bots/example-bot/`. W `.env.example` pozostawiono `GEMINI_API_KEY` oraz `GEMINI_MODEL`. W README dodano notkę referencyjną z hashem ostatniego commita zawierającego example-bot: `ecbcfba2f55579382156957859adda8b7550f8ff`.
+- **Consequences**: Mniej kodu do utrzymania; historia Git zachowana; credsy do Gemini gotowe do ewentualnych workflowów/integracji.
+
+---
+
