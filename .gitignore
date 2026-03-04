@@ -1,0 +1,56 @@
+### General
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
+*.swp
+*.swo
+
+### Node / TypeScript (node-gateway, tools)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+dist/
+build/
+coverage/
+.nyc_output/
+.turbo/
+
+### Python (biometric-proxy, bots)
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.envrc
+.venv/
+venv/
+env/
+
+### IDE / Editor
+.idea/
+.vscode/
+.history/
+
+### Docker / Compose
+deploy/*.env
+deploy/*.env.*
+docker-data/
+
+### Environment & secrets (root)
+.env
+.env.*
+!.env.example
+
+### OS / Misc
+*.bak
+*.orig
+*.rej
+

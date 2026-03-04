@@ -1,0 +1,33 @@
+{
+  "name": "node-gateway",
+  "version": "1.0.0",
+  "description": "Node.js gateway for Telegram and n8n automation (AI-driven Automation Gateway).",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
+    "test": "jest",
+    "test:coverage": "jest --coverage"
+  },
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "fastify": "^4.28.1",
+    "node-fetch": "^3.3.2",
+    "pg": "^8.12.0",
+    "telegraf": "^4.16.3"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.12",
+    "@types/node": "^22.7.4",
+    "@types/node-fetch": "^2.6.11",
+    "@types/pg": "^8.10.2",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node-dev": "^2.0.0",
+    "typescript": "^5.6.3"
+  },
+  "type": "module"
+}
+
