@@ -54,7 +54,13 @@ describe("Bot command handlers", () => {
     databaseUrl: "postgres://user:pass@localhost:5432/db",
     internalApiKey: "internal-key",
     n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+    n8nWebhookSecret: "webhook-secret",
     masterChatId: 1,
+    voiceBase64MaxBytes: 1024,
+    outboxProcessedTtlHours: 72,
+    outboxPollIntervalMs: 5000,
+    outboxBatchSize: 10,
+    outboxMaxRetries: 5,
   };
 
   let storedState: { userId: number; state: string } | null = null;

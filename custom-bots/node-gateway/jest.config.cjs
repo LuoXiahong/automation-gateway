@@ -6,6 +6,7 @@ module.exports = {
   moduleFileExtensions: ["ts", "js", "json"],
   roots: ["<rootDir>/src", "<rootDir>/tests"],
   extensionsToTreatAsEsm: [".ts"],
+  forceExit: true,
   collectCoverage: true,
   collectCoverageFrom: ["src/telegramBot.ts", "src/server.ts"],
   coverageThreshold: {

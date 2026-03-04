@@ -1,7 +1,8 @@
 import { Telegraf, Context, Markup } from "telegraf";
+import { randomUUID } from "crypto";
 import { AppConfig } from "./config.js";
-import { HttpClient, N8nWebhookPayload } from "./httpClient.js";
-import { AllowedChatRepository, UserStateRepository } from "./db.js";
+import { N8nWebhookPayload } from "./httpClient.js";
+import { AllowedChatRepository, OutboxRepository, UserStateRepository } from "./db.js";
 
 /** Callback data for menu buttons (prefix menu: to avoid collisions). */
 export const MENU_CB = {
@@ -19,7 +20,8 @@ export interface BotDependencies {
   config: AppConfig;
   userStateRepository: UserStateRepository;
   allowedChatRepository: AllowedChatRepository;
-  httpClient: HttpClient;
+  outboxRepository: OutboxRepository;
+  downloadAudioBuffer: (url: string) => Promise<Buffer>;
 }
 
 export async function handleUserTextMessage(ctx: Context, deps: BotDependencies): Promise<void> {
@@ -34,17 +36,15 @@ export async function handleUserTextMessage(ctx: Context, deps: BotDependencies)
 
   if (currentState === "awaiting_plan") {
     try {
+      const correlationId = randomUUID();
+      const eventId = randomUUID();
       const payload: N8nWebhookPayload = { chatId, text };
-      const response = await deps.httpClient.post(deps.config.n8nWebhookUrl, payload);
-
-      if (!response.ok) {
-        await ctx.reply(
-          "System planowania jest chwilowo niedostępny. Spróbuj proszę ponownie za kilka minut."
-        );
-        return;
-      }
-
-      await deps.userStateRepository.setUserState(chatId, "default");
+      await deps.outboxRepository.enqueuePlanAndSetDefaultState({
+        eventId,
+        chatId,
+        correlationId,
+        payload,
+      });
       await ctx.reply("Dzięki, przekazuję Twój plan do systemu.");
     } catch {
       await ctx.reply("Nie udało się teraz przekazać planu do systemu. Spróbuj ponownie później.");
@@ -67,28 +67,55 @@ export async function handleUserVoiceMessage(ctx: Context, deps: BotDependencies
   }
 
   try {
+    const fileSizeBytes = await resolveVoiceFileSizeBytes(ctx, voice.file_id, voice.file_size);
+    if (!fileSizeBytes || fileSizeBytes > deps.config.voiceBase64MaxBytes) {
+      await ctx.reply("Notatka głosowa jest zbyt duża. Wyślij krótszą wiadomość głosową.");
+      return;
+    }
+
     const fileLink = await ctx.telegram.getFileLink(voice.file_id);
     const fileUrl = typeof fileLink === "string" ? fileLink : fileLink.href;
+    const fileBuffer = await deps.downloadAudioBuffer(fileUrl);
 
     const payload: N8nWebhookPayload = {
       chatId,
       text: "[VOICE]",
-      fileUrl,
+      voiceBase64: fileBuffer.toString("base64"),
+      voiceMimeType: "audio/ogg",
+      voiceDurationSeconds: voice.duration,
     };
-    const response = await deps.httpClient.post(deps.config.n8nWebhookUrl, payload);
-
-    if (!response.ok) {
-      await ctx.reply(
-        "System planowania jest chwilowo niedostępny. Spróbuj proszę ponownie za kilka minut."
-      );
-      return;
-    }
-
-    await deps.userStateRepository.setUserState(chatId, "default");
+    const correlationId = randomUUID();
+    const eventId = randomUUID();
+    await deps.outboxRepository.enqueuePlanAndSetDefaultState({
+      eventId,
+      chatId,
+      correlationId,
+      payload,
+    });
     await ctx.reply("Dzięki, przekazuję Twój plan do systemu.");
   } catch {
     await ctx.reply("Nie udało się teraz przekazać planu do systemu. Spróbuj ponownie później.");
   }
+}
+
+interface TelegramFileInfo {
+  file_size?: number;
+}
+
+async function resolveVoiceFileSizeBytes(
+  ctx: Context,
+  fileId: string,
+  voiceMessageFileSize?: number
+): Promise<number | null> {
+  if (typeof voiceMessageFileSize === "number" && voiceMessageFileSize > 0) {
+    return voiceMessageFileSize;
+  }
+
+  const fileInfo = (await ctx.telegram.getFile(fileId)) as TelegramFileInfo;
+  if (typeof fileInfo.file_size === "number" && fileInfo.file_size > 0) {
+    return fileInfo.file_size;
+  }
+  return null;
 }
 
 export async function authorizeContext(

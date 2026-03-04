@@ -24,7 +24,13 @@ describe("Internal APIs", () => {
       databaseUrl: "postgres://user:pass@localhost/db",
       internalApiKey: "secret-key",
       n8nWebhookUrl: "http://n8n/webhook",
+      n8nWebhookSecret: "webhook-secret",
       masterChatId: 1,
+      voiceBase64MaxBytes: 1024,
+      outboxProcessedTtlHours: 72,
+      outboxPollIntervalMs: 5000,
+      outboxBatchSize: 10,
+      outboxMaxRetries: 5,
     };
 
     telegram = new FakeTelegram();
@@ -65,6 +71,10 @@ describe("Internal APIs", () => {
       allowedChatRepository,
       bot,
     });
+  });
+
+  afterEach(async () => {
+    await app.close();
   });
 
   it("Given valid api key and payload, When calling internal message API, Then sends telegram message and updates state", async () => {

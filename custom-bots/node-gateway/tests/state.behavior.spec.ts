@@ -1,9 +1,12 @@
 import { Context } from "telegraf";
-import type { Response } from "node-fetch";
 import { AppConfig } from "../src/config";
 import { handleUserTextMessage, handleUserVoiceMessage } from "../src/telegramBot";
-import { AllowedChatRepository, UserStateRepository } from "../src/db";
-import { HttpClient } from "../src/httpClient";
+import {
+  AllowedChatRepository,
+  EnqueuePlanInput,
+  OutboxRepository,
+  UserStateRepository,
+} from "../src/db";
 
 interface TestContext {
   chat: { id: number };
@@ -13,9 +16,12 @@ interface TestContext {
 
 interface TestVoiceContext {
   chat: { id: number };
-  message: { voice: { file_id: string } };
+  message: { voice: { file_id: string; duration: number; file_size?: number } };
   reply: (text: string) => Promise<void>;
-  telegram: { getFileLink: (fileId: string) => Promise<string> };
+  telegram: {
+    getFileLink: (fileId: string) => Promise<string>;
+    getFile: (fileId: string) => Promise<{ file_size?: number }>;
+  };
 }
 
 describe("User state behavior", () => {
@@ -49,31 +55,40 @@ describe("User state behavior", () => {
       databaseUrl: "postgres://user:pass@localhost:5432/db",
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      n8nWebhookSecret: "webhook-secret",
       masterChatId: 1,
+      voiceBase64MaxBytes: 1024,
+      outboxProcessedTtlHours: 72,
+      outboxPollIntervalMs: 5000,
+      outboxBatchSize: 10,
+      outboxMaxRetries: 5,
     };
 
-    let storedState = "awaiting_plan";
     const userStateRepository: UserStateRepository = {
       async getUserState(userId: number): Promise<string> {
         expect(userId).toBe(12345);
-        return storedState;
+        return "awaiting_plan";
       },
-      async setUserState(userId: number, newState: string): Promise<void> {
-        expect(userId).toBe(12345);
-        storedState = newState;
+      async setUserState(): Promise<void> {
+        // no-op
       },
     };
 
-    const postedPayloads: Array<{
-      url: string;
-      body: unknown;
-      headers?: Record<string, string>;
-    }> = [];
-
-    const httpClient: HttpClient = {
-      async post(url: string, body: unknown, headers?: Record<string, string>) {
-        postedPayloads.push({ url, body, headers });
-        return { ok: true } as Response;
+    const enqueued: EnqueuePlanInput[] = [];
+    const outboxRepository: OutboxRepository = {
+      async enqueuePlanAndSetDefaultState(input: EnqueuePlanInput): Promise<{ eventId: string }> {
+        enqueued.push(input);
+        return { eventId: input.eventId };
+      },
+      async getPendingBatch(): Promise<never[]> {
+        return [];
+      },
+      async markProcessed(): Promise<void> {},
+      async markFailed(): Promise<void> {},
+      async markDeadLetter(): Promise<void> {},
+      async scheduleRetry(): Promise<void> {},
+      async pruneProcessedEvents(): Promise<number> {
+        return 0;
       },
     };
 
@@ -81,22 +96,23 @@ describe("User state behavior", () => {
       config,
       userStateRepository,
       allowedChatRepository,
-      httpClient,
+      outboxRepository,
+      downloadAudioBuffer: async () => Buffer.from("unused"),
     });
 
-    expect(postedPayloads).toHaveLength(1);
-    expect(postedPayloads[0].url).toBe(config.n8nWebhookUrl);
-    expect(postedPayloads[0].body).toEqual({
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0].chatId).toBe(12345);
+    expect(enqueued[0].correlationId).toEqual(expect.any(String));
+    expect(enqueued[0].eventId).toEqual(expect.any(String));
+    expect(enqueued[0].payload).toEqual({
       chatId: 12345,
       text: "Mój plan działania",
     });
-
-    expect(storedState).toBe("default");
     expect(sentReplies.length).toBe(1);
     expect(sentReplies[0]).toContain("przekazuję Twój plan");
   });
 
-  it("Given user is in awaiting_plan state and webhook fails, When user sends a message, Then do not reset state and inform user about failure", async () => {
+  it("Given user is in awaiting_plan state and outbox save fails, When user sends a message, Then inform user about retry later", async () => {
     const sentReplies: string[] = [];
     const fakeCtx: TestContext = {
       chat: { id: 111 },
@@ -111,70 +127,38 @@ describe("User state behavior", () => {
       databaseUrl: "postgres://user:pass@localhost:5432/db",
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      n8nWebhookSecret: "webhook-secret",
       masterChatId: 1,
+      voiceBase64MaxBytes: 1024,
+      outboxProcessedTtlHours: 72,
+      outboxPollIntervalMs: 5000,
+      outboxBatchSize: 10,
+      outboxMaxRetries: 5,
     };
 
-    let storedState = "awaiting_plan";
     const userStateRepository: UserStateRepository = {
       async getUserState(userId: number): Promise<string> {
         expect(userId).toBe(111);
-        return storedState;
+        return "awaiting_plan";
       },
-      async setUserState(userId: number, newState: string): Promise<void> {
-        storedState = newState;
-      },
-    };
-
-    const httpClient: HttpClient = {
-      async post() {
-        return { ok: false } as Response;
+      async setUserState(): Promise<void> {
+        // no-op
       },
     };
 
-    await handleUserTextMessage(fakeCtx as unknown as Context, {
-      config,
-      userStateRepository,
-      allowedChatRepository,
-      httpClient,
-    });
-
-    expect(storedState).toBe("awaiting_plan");
-    expect(sentReplies.length).toBe(1);
-    expect(sentReplies[0]).toContain("chwilowo niedostępny");
-  });
-
-  it("Given user is in awaiting_plan state and webhook throws, When user sends a message, Then do not reset state and inform user about retry later", async () => {
-    const sentReplies: string[] = [];
-    const fakeCtx: TestContext = {
-      chat: { id: 222 },
-      message: { text: "Plan z wyjątkiem" },
-      reply: async (text: string) => {
-        sentReplies.push(text);
+    const outboxRepository: OutboxRepository = {
+      async enqueuePlanAndSetDefaultState() {
+        throw new Error("db unavailable");
       },
-    };
-
-    const config: AppConfig = {
-      telegramBotToken: "test-token",
-      databaseUrl: "postgres://user:pass@localhost:5432/db",
-      internalApiKey: "internal-key",
-      n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
-      masterChatId: 1,
-    };
-
-    let storedState = "awaiting_plan";
-    const userStateRepository: UserStateRepository = {
-      async getUserState(userId: number): Promise<string> {
-        expect(userId).toBe(222);
-        return storedState;
+      async getPendingBatch(): Promise<never[]> {
+        return [];
       },
-      async setUserState(userId: number, newState: string): Promise<void> {
-        storedState = newState;
-      },
-    };
-
-    const httpClient: HttpClient = {
-      async post() {
-        throw new Error("network error");
+      async markProcessed(): Promise<void> {},
+      async markFailed(): Promise<void> {},
+      async markDeadLetter(): Promise<void> {},
+      async scheduleRetry(): Promise<void> {},
+      async pruneProcessedEvents(): Promise<number> {
+        return 0;
       },
     };
 
@@ -182,25 +166,26 @@ describe("User state behavior", () => {
       config,
       userStateRepository,
       allowedChatRepository,
-      httpClient,
+      outboxRepository,
+      downloadAudioBuffer: async () => Buffer.from("unused"),
     });
 
-    expect(storedState).toBe("awaiting_plan");
     expect(sentReplies.length).toBe(1);
     expect(sentReplies[0]).toContain("Spróbuj ponownie później");
   });
 
-  it("Given user is in awaiting_plan state, When user sends a voice message, Then forward fileUrl to n8n and set state to default", async () => {
+  it("Given user is in awaiting_plan state, When user sends a voice message, Then encode audio to base64 and enqueue event", async () => {
     const sentReplies: string[] = [];
-    const fileUrl = "https://api.telegram.org/file/bot-token/voice/abc.ogg";
+    const downloadedBuffer = Buffer.from("voice-data");
     const fakeCtx: TestVoiceContext = {
       chat: { id: 777 },
-      message: { voice: { file_id: "voice-file-123" } },
+      message: { voice: { file_id: "voice-file-123", duration: 6, file_size: 20 } },
       reply: async (text: string) => {
         sentReplies.push(text);
       },
       telegram: {
-        getFileLink: async () => fileUrl,
+        getFileLink: async () => "https://api.telegram.org/file/bot-token/voice/abc.ogg",
+        getFile: async () => ({ file_size: 20 }),
       },
     };
 
@@ -209,26 +194,40 @@ describe("User state behavior", () => {
       databaseUrl: "postgres://user:pass@localhost:5432/db",
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      n8nWebhookSecret: "webhook-secret",
       masterChatId: 1,
+      voiceBase64MaxBytes: 1024,
+      outboxProcessedTtlHours: 72,
+      outboxPollIntervalMs: 5000,
+      outboxBatchSize: 10,
+      outboxMaxRetries: 5,
     };
 
-    let storedState = "awaiting_plan";
     const userStateRepository: UserStateRepository = {
       async getUserState(userId: number): Promise<string> {
         expect(userId).toBe(777);
-        return storedState;
+        return "awaiting_plan";
       },
-      async setUserState(userId: number, newState: string): Promise<void> {
-        expect(userId).toBe(777);
-        storedState = newState;
+      async setUserState(): Promise<void> {
+        // no-op
       },
     };
 
-    const postedPayloads: Array<{ url: string; body: unknown }> = [];
-    const httpClient: HttpClient = {
-      async post(url: string, body: unknown) {
-        postedPayloads.push({ url, body });
-        return { ok: true } as Response;
+    const enqueued: EnqueuePlanInput[] = [];
+    const outboxRepository: OutboxRepository = {
+      async enqueuePlanAndSetDefaultState(input: EnqueuePlanInput): Promise<{ eventId: string }> {
+        enqueued.push(input);
+        return { eventId: input.eventId };
+      },
+      async getPendingBatch(): Promise<never[]> {
+        return [];
+      },
+      async markProcessed(): Promise<void> {},
+      async markFailed(): Promise<void> {},
+      async markDeadLetter(): Promise<void> {},
+      async scheduleRetry(): Promise<void> {},
+      async pruneProcessedEvents(): Promise<number> {
+        return 0;
       },
     };
 
@@ -236,29 +235,35 @@ describe("User state behavior", () => {
       config,
       userStateRepository,
       allowedChatRepository,
-      httpClient,
+      outboxRepository,
+      downloadAudioBuffer: async () => downloadedBuffer,
     });
 
-    expect(postedPayloads).toHaveLength(1);
-    expect(postedPayloads[0].url).toBe(config.n8nWebhookUrl);
-    expect(postedPayloads[0].body).toEqual({
+    expect(enqueued).toHaveLength(1);
+    expect(enqueued[0].payload).toEqual({
       chatId: 777,
       text: "[VOICE]",
-      fileUrl,
+      voiceBase64: downloadedBuffer.toString("base64"),
+      voiceMimeType: "audio/ogg",
+      voiceDurationSeconds: 6,
     });
-    expect(storedState).toBe("default");
     expect(sentReplies[0]).toContain("przekazuję Twój plan");
   });
 
-  it("Given user is in awaiting_plan state and webhook fails, When user sends voice, Then do not reset state and inform user", async () => {
+  it("Given user is in awaiting_plan state and voice is larger than limit, When user sends voice, Then reject before downloading file", async () => {
     const sentReplies: string[] = [];
+    const downloadCalls: string[] = [];
+    const outboxCalls: EnqueuePlanInput[] = [];
     const fakeCtx: TestVoiceContext = {
       chat: { id: 888 },
-      message: { voice: { file_id: "voice-456" } },
+      message: { voice: { file_id: "voice-456", duration: 20, file_size: 10_000 } },
       reply: async (text: string) => {
         sentReplies.push(text);
       },
-      telegram: { getFileLink: async () => "https://example.com/voice.ogg" },
+      telegram: {
+        getFileLink: async () => "https://example.com/voice.ogg",
+        getFile: async () => ({ file_size: 10_000 }),
+      },
     };
 
     const config: AppConfig = {
@@ -266,22 +271,38 @@ describe("User state behavior", () => {
       databaseUrl: "postgres://user:pass@localhost:5432/db",
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
+      n8nWebhookSecret: "webhook-secret",
       masterChatId: 1,
+      voiceBase64MaxBytes: 2048,
+      outboxProcessedTtlHours: 72,
+      outboxPollIntervalMs: 5000,
+      outboxBatchSize: 10,
+      outboxMaxRetries: 5,
     };
 
-    let storedState = "awaiting_plan";
     const userStateRepository: UserStateRepository = {
       async getUserState(): Promise<string> {
-        return storedState;
+        return "awaiting_plan";
       },
-      async setUserState(_, newState: string): Promise<void> {
-        storedState = newState;
+      async setUserState(): Promise<void> {
+        // no-op
       },
     };
 
-    const httpClient: HttpClient = {
-      async post() {
-        return { ok: false } as Response;
+    const outboxRepository: OutboxRepository = {
+      async enqueuePlanAndSetDefaultState(input: EnqueuePlanInput): Promise<{ eventId: string }> {
+        outboxCalls.push(input);
+        return { eventId: input.eventId };
+      },
+      async getPendingBatch(): Promise<never[]> {
+        return [];
+      },
+      async markProcessed(): Promise<void> {},
+      async markFailed(): Promise<void> {},
+      async markDeadLetter(): Promise<void> {},
+      async scheduleRetry(): Promise<void> {},
+      async pruneProcessedEvents(): Promise<number> {
+        return 0;
       },
     };
 
@@ -289,10 +310,15 @@ describe("User state behavior", () => {
       config,
       userStateRepository,
       allowedChatRepository,
-      httpClient,
+      outboxRepository,
+      downloadAudioBuffer: async (url: string) => {
+        downloadCalls.push(url);
+        return Buffer.from("should-not-download");
+      },
     });
 
-    expect(storedState).toBe("awaiting_plan");
-    expect(sentReplies[0]).toContain("chwilowo niedostępny");
+    expect(downloadCalls).toHaveLength(0);
+    expect(outboxCalls).toHaveLength(0);
+    expect(sentReplies[0]).toContain("zbyt duża");
   });
 });

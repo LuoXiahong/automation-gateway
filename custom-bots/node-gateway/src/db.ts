@@ -1,4 +1,5 @@
 import { Pool } from "pg";
+import { N8nWebhookPayload } from "./httpClient.js";
 
 export interface UserStateRepository {
   getUserState(userId: number): Promise<string>;
@@ -10,6 +11,33 @@ export interface AllowedChatRepository {
   allowChat(chatId: number): Promise<void>;
   revokeChat(chatId: number): Promise<void>;
   listAllowedChats(): Promise<number[]>;
+}
+
+export type OutboxStatus = "pending" | "processing" | "processed" | "failed" | "dead_letter";
+
+export interface EnqueuePlanInput {
+  eventId: string;
+  chatId: number;
+  correlationId: string;
+  payload: N8nWebhookPayload;
+}
+
+export interface OutboxEventRow {
+  id: string;
+  chat_id: number;
+  payload_json: N8nWebhookPayload;
+  correlation_id: string;
+  attempt_count: number;
+}
+
+export interface OutboxRepository {
+  enqueuePlanAndSetDefaultState(input: EnqueuePlanInput): Promise<{ eventId: string }>;
+  getPendingBatch(batchSize: number): Promise<OutboxEventRow[]>;
+  markProcessed(id: string): Promise<void>;
+  markFailed(id: string, error: string, failureClass: string): Promise<void>;
+  markDeadLetter(id: string, error: string): Promise<void>;
+  scheduleRetry(id: string, attemptCount: number, nextAttemptAt: Date, lastError: string): Promise<void>;
+  pruneProcessedEvents(ttlHours: number): Promise<number>;
 }
 
 export function createPool(connectionString: string): Pool {
@@ -30,6 +58,37 @@ export async function runMigrations(pool: Pool): Promise<void> {
       chat_id BIGINT PRIMARY KEY,
       created_at TIMESTAMP NOT NULL DEFAULT NOW()
     );
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS outbox_events (
+      id UUID PRIMARY KEY,
+      event_type VARCHAR(64) NOT NULL,
+      chat_id BIGINT NOT NULL,
+      payload_json JSONB NOT NULL,
+      correlation_id UUID NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'pending',
+      attempt_count INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      last_error TEXT,
+      failure_class VARCHAR(32),
+      created_at TIMESTAMP NOT NULL DEFAULT NOW(),
+      processed_at TIMESTAMP,
+      failed_at TIMESTAMP,
+      CONSTRAINT outbox_events_status_check CHECK (
+        status IN ('pending', 'processing', 'processed', 'failed', 'dead_letter')
+      )
+    );
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_outbox_events_status_next_attempt_at
+    ON outbox_events (status, next_attempt_at);
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_outbox_events_processed_at
+    ON outbox_events (processed_at);
   `);
 }
 
@@ -88,6 +147,129 @@ export function createAllowedChatRepository(pool: Pool): AllowedChatRepository {
         "SELECT chat_id FROM allowed_chats ORDER BY chat_id ASC"
       );
       return result.rows.map((row) => Number(row.chat_id));
+    },
+  };
+}
+
+export function createOutboxRepository(pool: Pool): OutboxRepository {
+  return {
+    async enqueuePlanAndSetDefaultState(input: EnqueuePlanInput): Promise<{ eventId: string }> {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+
+        const insertResult = await client.query<{ id: string }>(
+          `
+            INSERT INTO outbox_events (
+              id,
+              event_type,
+              chat_id,
+              payload_json,
+              correlation_id,
+              status,
+              attempt_count,
+              next_attempt_at,
+              created_at
+            )
+            VALUES ($1::uuid, 'user_plan_submitted', $2, $3::jsonb, $4::uuid, 'pending', 0, NOW(), NOW())
+            RETURNING id;
+          `,
+          [input.eventId, input.chatId, JSON.stringify(input.payload), input.correlationId]
+        );
+
+        await client.query(
+          `
+            INSERT INTO user_states (user_id, current_state, updated_at)
+            VALUES ($1, 'default', NOW())
+            ON CONFLICT (user_id)
+            DO UPDATE SET current_state = 'default', updated_at = NOW();
+          `,
+          [input.chatId]
+        );
+
+        await client.query("COMMIT");
+        return { eventId: insertResult.rows[0].id };
+      } catch (error) {
+        await client.query("ROLLBACK");
+        throw error;
+      } finally {
+        client.release();
+      }
+    },
+
+    async getPendingBatch(batchSize: number): Promise<OutboxEventRow[]> {
+      const result = await pool.query<{
+        id: string;
+        chat_id: string;
+        payload_json: unknown;
+        correlation_id: string;
+        attempt_count: string;
+      }>(
+        `
+          WITH claimed AS (
+            SELECT id FROM outbox_events
+            WHERE status = 'pending' AND next_attempt_at <= NOW()
+            ORDER BY created_at
+            LIMIT $1
+            FOR UPDATE SKIP LOCKED
+          )
+          UPDATE outbox_events SET status = 'processing'
+          WHERE id IN (SELECT id FROM claimed)
+          RETURNING id, chat_id, payload_json, correlation_id, attempt_count;
+        `,
+        [batchSize]
+      );
+      return result.rows.map((row) => ({
+        id: row.id,
+        chat_id: Number(row.chat_id),
+        payload_json: row.payload_json as N8nWebhookPayload,
+        correlation_id: row.correlation_id,
+        attempt_count: Number(row.attempt_count),
+      }));
+    },
+
+    async markProcessed(id: string): Promise<void> {
+      await pool.query(
+        `UPDATE outbox_events SET status = 'processed', processed_at = NOW() WHERE id = $1::uuid`,
+        [id]
+      );
+    },
+
+    async markFailed(id: string, error: string, failureClass: string): Promise<void> {
+      await pool.query(
+        `UPDATE outbox_events SET status = 'failed', failed_at = NOW(), last_error = $2, failure_class = $3 WHERE id = $1::uuid`,
+        [id, error, failureClass]
+      );
+    },
+
+    async markDeadLetter(id: string, error: string): Promise<void> {
+      await pool.query(
+        `UPDATE outbox_events SET status = 'dead_letter', failed_at = NOW(), last_error = $2, failure_class = 'max_retries' WHERE id = $1::uuid`,
+        [id, error]
+      );
+    },
+
+    async scheduleRetry(
+      id: string,
+      attemptCount: number,
+      nextAttemptAt: Date,
+      lastError: string
+    ): Promise<void> {
+      await pool.query(
+        `UPDATE outbox_events SET status = 'pending', attempt_count = $2, next_attempt_at = $3, last_error = $4 WHERE id = $1::uuid`,
+        [id, attemptCount, nextAttemptAt, lastError]
+      );
+    },
+
+    async pruneProcessedEvents(ttlHours: number): Promise<number> {
+      const result = await pool.query<{ id: string }>(
+        `DELETE FROM outbox_events
+         WHERE status = 'processed' AND processed_at IS NOT NULL
+           AND processed_at < NOW() - $1::int * interval '1 hour'
+         RETURNING id`,
+        [ttlHours]
+      );
+      return result.rowCount ?? 0;
     },
   };
 }

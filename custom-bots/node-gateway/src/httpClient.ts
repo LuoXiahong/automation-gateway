@@ -9,7 +9,9 @@ interface AbortSignalWithTimeout {
 export interface N8nWebhookPayload {
   chatId: number;
   text: string;
-  fileUrl?: string;
+  voiceBase64?: string;
+  voiceMimeType?: string;
+  voiceDurationSeconds?: number;
 }
 
 export interface HttpClient {
