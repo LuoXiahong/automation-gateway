@@ -79,3 +79,23 @@
     - łatwe dodanie kolejnych typów wewnętrznych zdarzeń (inne API niż „stress-alert”) bez modyfikowania kontraktu na poziomie biometrów,
     - możliwość wdrożenia bardziej zaawansowanych reguł ACL (role, tryby demo, itp.) przy zachowaniu tego samego interfejsu wewnętrznego.
 
+---
+
+#### ADR-004: Klikalne menu po /start (inline keyboard) zamiast wyłącznie komend tekstowych
+
+- **Context**:
+  - Użytkownicy muszą znać komendy (`/impuls`, `/allow_here` itd.) i wpisywać je ręcznie.
+  - Brak jednego punktu wejścia ułatwiającego odkrycie dostępnych akcji; administratorzy muszą pamiętać komendy whitelisty.
+- **Decision**:
+  - Po komendzie `/start` bot wysyła powitanie oraz **inline keyboard** (przyciski pod wiadomością).
+  - Menu jest **pogrupowane**:
+    - **Dla wszystkich użytkowników:** przycisk „Złap dystans (Impuls)” → ta sama logika co `/impuls`.
+    - **Tylko dla ownera (MASTER_CHAT_ID):** przyciski „Allow here”, „Revoke here”, „Lista whitelist” → odpowiedniki `/allow_here`, `/revoke_here`, `/allowed_list`.
+  - Kliknięcie przycisku generuje `callback_query`; handler wywołuje `ctx.answerCbQuery()` i tę samą logikę co przy komendzie (brak duplikacji – reuse `handleImpulsCommand` itd.).
+  - Stałe `MENU_CB` (np. `menu:impuls`) eksportowane z `telegramBot.ts` na potrzeby testów i ewentualnych rozszerzeń.
+- **Consequences**:
+  - Lepsza discoverability: nowy użytkownik po `/start` od razu widzi dostępne akcje.
+  - Owner ma szybki dostęp do zarządzania whitelistą bez wpisywania komend.
+  - Komendy tekstowe nadal działają (backward compatibility).
+  - Jedna źródłowa prawda dla logiki: przyciski i komendy korzystają z tych samych handlerów.
+

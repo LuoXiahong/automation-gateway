@@ -114,14 +114,14 @@ docker compose up -d
 4. W Telegramie:
 
 - utwórz bota przez `@BotFather`,
-- ustaw `TELEGRAM_BOT_TOKEN` w `.env`,
-- wyślij komendę `/impuls` do bota, aby przetestować zmianę stanu na `cooling_down_120s`.
+- ustaw `TELEGRAM_BOT_TOKEN` i `MASTER_CHAT_ID` (swój Chat ID) w `.env`,
+- wyślij do bota komendę **`/start`** – pojawi się powitanie i **klikalne menu** (przyciski: Impuls, a dla ownera także Allow here / Revoke here / Lista whitelist),
+- możesz też wpisać `/impuls`, aby przetestować zmianę stanu na `cooling_down_120s`.
 
-5. W Garmina:
+5. W Garminie:
 
 - ustaw realne `GARMIN_EMAIL` i `GARMIN_PASSWORD`,
-- ustaw `STRESS_ALERT_CHAT_ID` na swój Chat ID,
-- po przekroczeniu progu stresu `biometric-proxy` wyśle alert do `node-gateway`, który przekaże go do Twojego chatu w Telegramie.
+- po przekroczeniu progu stresu (`STRESS_ALERT_THRESHOLD`) `biometric-proxy` wyśle alert do `node-gateway`, który przekaże go do ownera i whitelistowanych chatów w Telegramie.
 
 ---
 

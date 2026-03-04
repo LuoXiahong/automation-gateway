@@ -41,7 +41,7 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    TelegramUser["User in Telegram"] -->|/impuls lub dowolny tekst| Auth["Global auth middleware"]
+    TelegramUser["User in Telegram"] -->|/start, /impuls, przyciski menu lub dowolny tekst| Auth["Global auth middleware"]
     Auth -->|authorized| NGTelegraf["Telegraf bot"]
     Auth -->|unauthorized| Dropped["drop without reply\n+ console.warn only"]
 
@@ -76,9 +76,12 @@ flowchart LR
 
 ### Security & ACL model (owner + whitelist)
 
+- **Punkt wejścia:** komenda `/start` wyświetla powitanie i **klikalne menu** (inline keyboard):
+  - dla wszystkich: przycisk „Złap dystans (Impuls)” (odpowiednik `/impuls`),
+  - tylko dla ownera: „Allow here”, „Revoke here”, „Lista whitelist” (odpowiedniki komend admina). Kliknięcie wywołuje tę samą logikę co komenda.
 - **Owner (`MASTER_CHAT_ID`)**:
   - zawsze przechodzi przez globalny middleware (niezależnie od whitelisty),
-  - może wykonywać komendy admina:
+  - może wykonywać komendy admina (lub użyć przycisków z menu po `/start`):
     - `/allow_here` – dodaje bieżący chat do tabeli `allowed_chats`,
     - `/revoke_here` – usuwa bieżący chat z `allowed_chats`,
     - `/allowed_list` – wypisuje aktualną whitelistę.
