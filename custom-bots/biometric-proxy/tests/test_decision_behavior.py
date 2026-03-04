@@ -66,6 +66,7 @@ async def test_given_stress_75_when_worker_runs_then_posts_to_node_gateway() -> 
     assert request["url"] == "http://node-gateway:8000/api/internal/stress-alert"
     assert request["json"]["stressValue"] == 75
     assert request["headers"]["x-internal-api-key"] == "secret-key"
+    assert "x-correlation-id" in request["headers"]
     assert "restingHeartRate" not in request["json"]
 
 

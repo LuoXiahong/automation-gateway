@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
@@ -58,7 +59,11 @@ class DecisionWorker:
         if snapshot.resting_heart_rate is not None:
             payload["restingHeartRate"] = snapshot.resting_heart_rate
 
-        headers = {"x-internal-api-key": self.internal_api_key}
+        correlation_id = str(uuid.uuid4())
+        headers = {
+            "x-internal-api-key": self.internal_api_key,
+            "x-correlation-id": correlation_id,
+        }
 
         await self.http_client.post(url, json=payload, headers=headers)
         self.last_alert_time = now
