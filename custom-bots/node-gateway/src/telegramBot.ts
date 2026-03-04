@@ -1,7 +1,7 @@
 import { Telegraf, Context } from "telegraf";
-import { AppConfig } from "./config";
-import { HttpClient } from "./httpClient";
-import { AllowedChatRepository, UserStateRepository } from "./db";
+import { AppConfig } from "./config.js";
+import { HttpClient } from "./httpClient.js";
+import { AllowedChatRepository, UserStateRepository } from "./db.js";
 
 export interface BotDependencies {
   config: AppConfig;

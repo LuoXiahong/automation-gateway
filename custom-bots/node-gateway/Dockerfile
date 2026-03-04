@@ -2,7 +2,7 @@ FROM node:20-alpine AS builder
 
 WORKDIR /app
 
-COPY package.json tsconfig.json jest.config.cjs ./
+COPY package.json tsconfig.json tsconfig.build.json jest.config.cjs ./
 COPY src ./src
 COPY tests ./tests
 

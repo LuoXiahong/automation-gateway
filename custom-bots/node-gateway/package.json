@@ -4,7 +4,7 @@
   "description": "Node.js gateway for Telegram and n8n automation (AI-driven Automation Gateway).",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
     "start": "node dist/index.js",
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "test": "jest",

@@ -1,6 +1,6 @@
 import Fastify, { FastifyInstance } from "fastify";
-import { AppConfig } from "./config";
-import { AllowedChatRepository, UserStateRepository } from "./db";
+import { AppConfig } from "./config.js";
+import { AllowedChatRepository, UserStateRepository } from "./db.js";
 import { Telegraf, Context } from "telegraf";
 
 interface InternalMessageBody {

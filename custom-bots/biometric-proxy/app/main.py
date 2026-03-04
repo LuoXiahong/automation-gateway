@@ -64,7 +64,6 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
     worker = DecisionWorker(
         stress_threshold=settings.stress_threshold,
-        alert_chat_id=settings.alert_chat_id,
         internal_api_key=settings.internal_api_key,
         node_gateway_url=settings.node_gateway_url,
         http_client=http_client,

@@ -1,13 +1,13 @@
-import { loadConfig } from "./config";
+import { loadConfig } from "./config.js";
 import {
   createAllowedChatRepository,
   createPool,
   createUserStateRepository,
   runMigrations,
-} from "./db";
-import { createHttpClient } from "./httpClient";
-import { createBot } from "./telegramBot";
-import { createServer } from "./server";
+} from "./db.js";
+import { createHttpClient } from "./httpClient.js";
+import { createBot } from "./telegramBot.js";
+import { createServer } from "./server.js";
 
 async function bootstrap(): Promise<void> {
   const config = loadConfig();
