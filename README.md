@@ -73,6 +73,9 @@ cp .env.example .env
   - `TELEGRAM_BOT_TOKEN` – token z `@BotFather` używany przez `node-gateway`.
 - **Distributed Automation Gateway:**
   - `N8N_WEBHOOK_URL` – URL webhooka w n8n, na który gateway wysyła zdarzenia.
+  - `N8N_WEBHOOK_SECRET` – sekretny nagłówek do uwierzytelniania żądań `node-gateway -> n8n`.
+  - `VOICE_BASE64_MAX_BYTES` – maksymalny rozmiar notatki głosowej dopuszczony do pobrania i kodowania Base64.
+  - `OUTBOX_PROCESSED_TTL_HOURS` – retencja rekordów outbox ze statusem `processed` (domyślnie 72h).
   - `INTERNAL_API_KEY` – sekretny klucz do komunikacji między `biometric-proxy` a `node-gateway`.
   - `GARMIN_EMAIL`, `GARMIN_PASSWORD` – dane logowania do Garmin Connect.
   - `STRESS_ALERT_THRESHOLD` – próg stresu, powyżej którego wysyłany jest impuls (domyślnie 70).

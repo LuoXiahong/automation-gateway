@@ -20,6 +20,14 @@
 
 ---
 
+#### ADR-009: Transakcyjny Outbox dla planów Telegram + bezpieczne voice Base64
+
+- **Context**: Dotychczas `node-gateway` wysyłał payload do n8n synchronicznie z handlera Telegram. Awarie sieci lub n8n powodowały utratę danych. Dla voice przekazywany był ulotny `fileUrl` (TTL). Brak odkurzania powodował bloat bazy.
+- **Decision**: Transakcyjny zapis do `outbox_events` z atomową zmianą stanu `awaiting_plan -> default`. Voice: pre-check rozmiaru (`VOICE_BASE64_MAX_BYTES`) przed pobraniem; audio w Base64 w `payload_json`. Worker outbox (setInterval) wysyła do n8n z `x-correlation-id`, `x-webhook-secret`, `x-idempotency-key`; 2xx → processed, 4xx → failed (bez retry), 5xx/timeout → exponential backoff do `OUTBOX_MAX_RETRIES`, potem dead_letter. Pruning rekordów `processed` po 72h.
+- **Consequences**: Gwarantowana dostawa do n8n; trwały zasób audio; ochrona Event Loop; ograniczenie bloatu.
+
+---
+
 #### ADR-002: PostgreSQL jako storage dla stanów użytkownika zamiast in-memory / Redis
 
 - **Context**:
@@ -146,6 +154,14 @@
 - **Context**: Katalog `example-bot` był legacy; chęć uproszczenia repo przy zachowaniu możliwości użycia API Gemini w przyszłości.
 - **Decision**: Usunięto katalog `custom-bots/example-bot/`. W `.env.example` pozostawiono `GEMINI_API_KEY` oraz `GEMINI_MODEL`. W README dodano notkę referencyjną z hashem ostatniego commita zawierającego example-bot: `ecbcfba2f55579382156957859adda8b7550f8ff`.
 - **Consequences**: Mniej kodu do utrzymania; historia Git zachowana; credsy do Gemini gotowe do ewentualnych workflowów/integracji.
+
+---
+
+#### ADR-010: Granularna obsługa błędów i Correlation ID (biometric-proxy)
+
+- **Context**: Szeroki `except Exception` w pętli biometric-proxy maskował przyczyny awarii; brak śledzenia żądań przez usługi.
+- **Decision**: Wprowadzono klasy wyjątków (`GarminAuthError`, `GarminTransientError`, `NodeGatewayUnauthorizedError`, `NodeGatewayTransientError`, `NodeGatewayPermanentError`). HTTP client mapuje 401 → NodeGatewayUnauthorizedError, 4xx → NodeGatewayPermanentError, 5xx/timeout → NodeGatewayTransientError. W pętli: obsługa po typie, exponential backoff z jitterem; przy 401 Garmina następna iteracja wykonuje świeże logowanie. Correlation ID (UUID) w nagłówku `x-correlation-id` przy wywołaniach do node-gateway.
+- **Consequences**: Łatwiejsza diagnostyka; odróżnienie poison-pill (4xx) od retry (5xx); odtwarzanie sesji Garmina po wygaśnięciu; ścieżka żądania identyfikowalna w logach.
 
 ---
 
