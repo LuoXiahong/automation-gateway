@@ -1,6 +1,7 @@
 import { Telegraf, Context, Markup } from "telegraf";
 import { randomUUID } from "crypto";
 import { AppConfig } from "./config.js";
+import { asChatId, asUserId, chatIdToNumber, userIdToNumber } from "./domain.js";
 import { N8nWebhookPayload } from "./httpClient.js";
 import { AllowedChatRepository, OutboxRepository, UserStateRepository } from "./db.js";
 
@@ -17,49 +18,22 @@ const COOLDOWN_FINISHED_MESSAGE =
   "Czas minął. Chłodny umysł przywrócony. Jaki masz teraz plan działania?";
 
 export interface BotDependencies {
-  config: AppConfig;
-  userStateRepository: UserStateRepository;
-  allowedChatRepository: AllowedChatRepository;
-  outboxRepository: OutboxRepository;
-  downloadAudioBuffer: (url: string) => Promise<Buffer>;
+  readonly config: AppConfig;
+  readonly userStateRepository: UserStateRepository;
+  readonly allowedChatRepository: AllowedChatRepository;
+  readonly outboxRepository: OutboxRepository;
+  readonly downloadAudioBuffer: (url: string) => Promise<Buffer>;
 }
 
 export async function handleUserTextMessage(ctx: Context, deps: BotDependencies): Promise<void> {
-  const chatId = ctx.chat?.id;
+  const rawChatId = ctx.chat?.id;
   const text = ctx.message && "text" in ctx.message ? ctx.message.text : null;
 
-  if (!chatId || text === null) {
+  if (rawChatId == null || text === null) {
     return;
   }
 
-  const currentState = await deps.userStateRepository.getUserState(chatId);
-
-  if (currentState === "awaiting_plan") {
-    try {
-      const correlationId = randomUUID();
-      const eventId = randomUUID();
-      const payload: N8nWebhookPayload = { chatId, text };
-      await deps.outboxRepository.enqueuePlanAndSetDefaultState({
-        eventId,
-        chatId,
-        correlationId,
-        payload,
-      });
-      await ctx.reply("Dzięki, przekazuję Twój plan do systemu.");
-    } catch {
-      await ctx.reply("Nie udało się teraz przekazać planu do systemu. Spróbuj ponownie później.");
-    }
-  }
-}
-
-export async function handleUserVoiceMessage(ctx: Context, deps: BotDependencies): Promise<void> {
-  const chatId = ctx.chat?.id;
-  const voice = ctx.message && "voice" in ctx.message ? ctx.message.voice : null;
-
-  if (!chatId || !voice?.file_id) {
-    return;
-  }
-
+  const chatId = asChatId(rawChatId);
   const currentState = await deps.userStateRepository.getUserState(chatId);
 
   if (currentState !== "awaiting_plan") {
@@ -67,12 +41,44 @@ export async function handleUserVoiceMessage(ctx: Context, deps: BotDependencies
   }
 
   try {
-    const fileSizeBytes = await resolveVoiceFileSizeBytes(ctx, voice.file_id, voice.file_size);
-    if (!fileSizeBytes || fileSizeBytes > deps.config.voiceBase64MaxBytes) {
-      await ctx.reply("Notatka głosowa jest zbyt duża. Wyślij krótszą wiadomość głosową.");
-      return;
-    }
+    const correlationId = randomUUID();
+    const eventId = randomUUID();
+    const payload: N8nWebhookPayload = { chatId, text };
+    await deps.outboxRepository.enqueuePlanAndSetDefaultState({
+      eventId,
+      chatId,
+      correlationId,
+      payload,
+    });
+    await ctx.reply("Dzięki, przekazuję Twój plan do systemu.");
+  } catch (err) {
+    console.error("handleUserTextMessage: enqueue failed", err);
+    await ctx.reply("Nie udało się teraz przekazać planu do systemu. Spróbuj ponownie później.");
+  }
+}
 
+export async function handleUserVoiceMessage(ctx: Context, deps: BotDependencies): Promise<void> {
+  const rawChatId = ctx.chat?.id;
+  const voice = ctx.message && "voice" in ctx.message ? ctx.message.voice : null;
+
+  if (rawChatId == null || !voice?.file_id) {
+    return;
+  }
+
+  const chatId = asChatId(rawChatId);
+  const currentState = await deps.userStateRepository.getUserState(chatId);
+
+  if (currentState !== "awaiting_plan") {
+    return;
+  }
+
+  const fileSizeBytes = await resolveVoiceFileSizeBytes(ctx, voice.file_id, voice.file_size);
+  if (fileSizeBytes == null || fileSizeBytes > deps.config.voiceBase64MaxBytes) {
+    await ctx.reply("Notatka głosowa jest zbyt duża. Wyślij krótszą wiadomość głosową.");
+    return;
+  }
+
+  try {
     const fileLink = await ctx.telegram.getFileLink(voice.file_id);
     const fileUrl = typeof fileLink === "string" ? fileLink : fileLink.href;
     const fileBuffer = await deps.downloadAudioBuffer(fileUrl);
@@ -93,7 +99,8 @@ export async function handleUserVoiceMessage(ctx: Context, deps: BotDependencies
       payload,
     });
     await ctx.reply("Dzięki, przekazuję Twój plan do systemu.");
-  } catch {
+  } catch (err) {
+    console.error("handleUserVoiceMessage: enqueue failed", err);
     await ctx.reply("Nie udało się teraz przekazać planu do systemu. Spróbuj ponownie później.");
   }
 }
@@ -123,21 +130,26 @@ export async function authorizeContext(
   deps: Pick<BotDependencies, "config" | "allowedChatRepository">,
   next: () => Promise<void>
 ): Promise<void> {
-  const fromId = ctx.from?.id;
-  const chatId = ctx.chat?.id;
+  const rawFromId = ctx.from?.id;
+  const rawChatId = ctx.chat?.id;
 
-  if (!fromId || !chatId) {
+  if (rawFromId == null || rawChatId == null) {
     return;
   }
 
-  if (fromId === deps.config.masterChatId) {
+  const fromId = asUserId(rawFromId);
+  const chatId = asChatId(rawChatId);
+
+  if (userIdToNumber(fromId) === chatIdToNumber(deps.config.masterChatId)) {
     await next();
     return;
   }
 
   const isAllowed = await deps.allowedChatRepository.isAllowed(chatId);
   if (!isAllowed) {
-    console.warn(`Blocked unauthorized access from user ${fromId} in chat ${chatId}`);
+    console.warn(
+      `Blocked unauthorized access from user ${rawFromId} in chat ${chatIdToNumber(chatId)}`
+    );
     return;
   }
 
@@ -148,10 +160,11 @@ export async function handleImpulsCommand(
   ctx: Context,
   deps: Pick<BotDependencies, "userStateRepository">
 ): Promise<void> {
-  const chatId = ctx.chat?.id;
-  if (!chatId) {
+  const rawChatId = ctx.chat?.id;
+  if (rawChatId == null) {
     return;
   }
+  const chatId = asChatId(rawChatId);
 
   const message =
     "Złapmy dystans. Odczekaj 120 sekund zanim podejmiesz decyzję. " +
@@ -163,7 +176,7 @@ export async function handleImpulsCommand(
   setTimeout(() => {
     void (async () => {
       try {
-        await ctx.telegram.sendMessage(chatId, COOLDOWN_FINISHED_MESSAGE);
+        await ctx.telegram.sendMessage(chatIdToNumber(chatId), COOLDOWN_FINISHED_MESSAGE);
         await deps.userStateRepository.setUserState(chatId, "awaiting_plan");
       } catch (err) {
         console.error("Impuls cooldown timer failed:", err);
@@ -177,39 +190,53 @@ export async function handleAllowHereCommand(
   ctx: Context,
   deps: Pick<BotDependencies, "config" | "allowedChatRepository">
 ): Promise<void> {
-  const fromId = ctx.from?.id;
-  const chatId = ctx.chat?.id;
+  const rawFromId = ctx.from?.id;
+  const rawChatId = ctx.chat?.id;
 
-  if (!fromId || fromId !== deps.config.masterChatId || !chatId) {
+  if (rawFromId == null || rawChatId == null) {
+    return;
+  }
+  const fromId = asUserId(rawFromId);
+  const chatId = asChatId(rawChatId);
+  if (userIdToNumber(fromId) !== chatIdToNumber(deps.config.masterChatId)) {
     return;
   }
 
   await deps.allowedChatRepository.allowChat(chatId);
-  await ctx.reply(`Ten chat (${chatId}) został dodany do whitelisty dostępu.`);
+  await ctx.reply(`Ten chat (${chatIdToNumber(chatId)}) został dodany do whitelisty dostępu.`);
 }
 
 export async function handleRevokeHereCommand(
   ctx: Context,
   deps: Pick<BotDependencies, "config" | "allowedChatRepository">
 ): Promise<void> {
-  const fromId = ctx.from?.id;
-  const chatId = ctx.chat?.id;
+  const rawFromId = ctx.from?.id;
+  const rawChatId = ctx.chat?.id;
 
-  if (!fromId || fromId !== deps.config.masterChatId || !chatId) {
+  if (rawFromId == null || rawChatId == null) {
+    return;
+  }
+  const fromId = asUserId(rawFromId);
+  const chatId = asChatId(rawChatId);
+  if (userIdToNumber(fromId) !== chatIdToNumber(deps.config.masterChatId)) {
     return;
   }
 
   await deps.allowedChatRepository.revokeChat(chatId);
-  await ctx.reply(`Ten chat (${chatId}) został usunięty z whitelisty dostępu.`);
+  await ctx.reply(`Ten chat (${chatIdToNumber(chatId)}) został usunięty z whitelisty dostępu.`);
 }
 
 export async function handleAllowedListCommand(
   ctx: Context,
   deps: Pick<BotDependencies, "config" | "allowedChatRepository">
 ): Promise<void> {
-  const fromId = ctx.from?.id;
+  const rawFromId = ctx.from?.id;
 
-  if (!fromId || fromId !== deps.config.masterChatId) {
+  if (rawFromId == null) {
+    return;
+  }
+  const fromId = asUserId(rawFromId);
+  if (userIdToNumber(fromId) !== chatIdToNumber(deps.config.masterChatId)) {
     return;
   }
 
@@ -220,7 +247,7 @@ export async function handleAllowedListCommand(
     return;
   }
 
-  const formatted = allowedChats.map((id) => `- ${id}`).join("\n");
+  const formatted = allowedChats.map((id) => `- ${chatIdToNumber(id)}`).join("\n");
   await ctx.reply(`Aktualna whitelist'a czatów (bez MASTER_CHAT_ID):\n${formatted}`);
 }
 
@@ -246,11 +273,11 @@ export async function handleStartCommand(
   ctx: Context,
   deps: Pick<BotDependencies, "config">
 ): Promise<void> {
-  const fromId = ctx.from?.id;
-  if (!fromId) {
+  const rawFromId = ctx.from?.id;
+  if (rawFromId == null) {
     return;
   }
-  const isMaster = fromId === deps.config.masterChatId;
+  const isMaster = userIdToNumber(asUserId(rawFromId)) === chatIdToNumber(deps.config.masterChatId);
   const keyboard = getStartMenuKeyboard(isMaster);
   await ctx.reply(START_WELCOME, keyboard);
 }

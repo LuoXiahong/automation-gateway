@@ -6,6 +6,9 @@ module.exports = {
   moduleFileExtensions: ["ts", "js", "json"],
   roots: ["<rootDir>/src", "<rootDir>/tests"],
   extensionsToTreatAsEsm: [".ts"],
+  moduleNameMapper: {
+    "^(\\.{1,2}/.*)\\.js$": "$1",
+  },
   forceExit: true,
   collectCoverage: true,
   collectCoverageFrom: ["src/telegramBot.ts", "src/server.ts"],

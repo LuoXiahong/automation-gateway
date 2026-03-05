@@ -41,7 +41,9 @@ async function bootstrap(): Promise<void> {
   const pruneTimer = setInterval(() => {
     void (async () => {
       try {
-        const deletedRows = await outboxRepository.pruneProcessedEvents(config.outboxProcessedTtlHours);
+        const deletedRows = await outboxRepository.pruneProcessedEvents(
+          config.outboxProcessedTtlHours
+        );
         if (deletedRows > 0) {
           console.warn(`Pruned ${deletedRows} processed outbox events`);
         }

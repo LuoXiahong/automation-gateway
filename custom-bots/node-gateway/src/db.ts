@@ -1,33 +1,41 @@
 import { Pool } from "pg";
+import { asChatId, type ChatId, chatIdToNumber } from "./domain.js";
 import { N8nWebhookPayload } from "./httpClient.js";
 
+export interface ScheduleRetryParams {
+  readonly id: string;
+  readonly attemptCount: number;
+  readonly nextAttemptAt: Date;
+  readonly lastError: string;
+}
+
 export interface UserStateRepository {
-  getUserState(userId: number): Promise<string>;
-  setUserState(userId: number, newState: string): Promise<void>;
+  getUserState(chatId: ChatId): Promise<string>;
+  setUserState(chatId: ChatId, newState: string): Promise<void>;
 }
 
 export interface AllowedChatRepository {
-  isAllowed(chatId: number): Promise<boolean>;
-  allowChat(chatId: number): Promise<void>;
-  revokeChat(chatId: number): Promise<void>;
-  listAllowedChats(): Promise<number[]>;
+  isAllowed(chatId: ChatId): Promise<boolean>;
+  allowChat(chatId: ChatId): Promise<void>;
+  revokeChat(chatId: ChatId): Promise<void>;
+  listAllowedChats(): Promise<readonly ChatId[]>;
 }
 
 export type OutboxStatus = "pending" | "processing" | "processed" | "failed" | "dead_letter";
 
 export interface EnqueuePlanInput {
-  eventId: string;
-  chatId: number;
-  correlationId: string;
-  payload: N8nWebhookPayload;
+  readonly eventId: string;
+  readonly chatId: ChatId;
+  readonly correlationId: string;
+  readonly payload: N8nWebhookPayload;
 }
 
 export interface OutboxEventRow {
-  id: string;
-  chat_id: number;
-  payload_json: N8nWebhookPayload;
-  correlation_id: string;
-  attempt_count: number;
+  readonly id: string;
+  readonly chat_id: ChatId;
+  readonly payload_json: N8nWebhookPayload;
+  readonly correlation_id: string;
+  readonly attempt_count: number;
 }
 
 export interface OutboxRepository {
@@ -36,7 +44,7 @@ export interface OutboxRepository {
   markProcessed(id: string): Promise<void>;
   markFailed(id: string, error: string, failureClass: string): Promise<void>;
   markDeadLetter(id: string, error: string): Promise<void>;
-  scheduleRetry(id: string, attemptCount: number, nextAttemptAt: Date, lastError: string): Promise<void>;
+  scheduleRetry(params: ScheduleRetryParams): Promise<void>;
   pruneProcessedEvents(ttlHours: number): Promise<number>;
 }
 
@@ -94,16 +102,16 @@ export async function runMigrations(pool: Pool): Promise<void> {
 
 export function createUserStateRepository(pool: Pool): UserStateRepository {
   return {
-    async getUserState(userId: number): Promise<string> {
+    async getUserState(chatId: ChatId): Promise<string> {
       const result = await pool.query<{
         current_state: string;
-      }>("SELECT current_state FROM user_states WHERE user_id = $1", [userId]);
+      }>("SELECT current_state FROM user_states WHERE user_id = $1", [chatIdToNumber(chatId)]);
       if (result.rows.length === 0) {
         return "default";
       }
       return result.rows[0].current_state;
     },
-    async setUserState(userId: number, newState: string): Promise<void> {
+    async setUserState(chatId: ChatId, newState: string): Promise<void> {
       await pool.query(
         `
         INSERT INTO user_states (user_id, current_state, updated_at)
@@ -111,7 +119,7 @@ export function createUserStateRepository(pool: Pool): UserStateRepository {
         ON CONFLICT (user_id)
         DO UPDATE SET current_state = EXCLUDED.current_state, updated_at = NOW();
       `,
-        [userId, newState]
+        [chatIdToNumber(chatId), newState]
       );
     },
   };
@@ -119,34 +127,34 @@ export function createUserStateRepository(pool: Pool): UserStateRepository {
 
 export function createAllowedChatRepository(pool: Pool): AllowedChatRepository {
   return {
-    async isAllowed(chatId: number): Promise<boolean> {
+    async isAllowed(chatId: ChatId): Promise<boolean> {
       const result = await pool.query<{ chat_id: string }>(
         "SELECT chat_id FROM allowed_chats WHERE chat_id = $1",
-        [chatId]
+        [chatIdToNumber(chatId)]
       );
       return result.rows.length > 0;
     },
 
-    async allowChat(chatId: number): Promise<void> {
+    async allowChat(chatId: ChatId): Promise<void> {
       await pool.query(
         `
         INSERT INTO allowed_chats (chat_id, created_at)
         VALUES ($1, NOW())
         ON CONFLICT (chat_id) DO NOTHING;
       `,
-        [chatId]
+        [chatIdToNumber(chatId)]
       );
     },
 
-    async revokeChat(chatId: number): Promise<void> {
-      await pool.query("DELETE FROM allowed_chats WHERE chat_id = $1", [chatId]);
+    async revokeChat(chatId: ChatId): Promise<void> {
+      await pool.query("DELETE FROM allowed_chats WHERE chat_id = $1", [chatIdToNumber(chatId)]);
     },
 
-    async listAllowedChats(): Promise<number[]> {
+    async listAllowedChats(): Promise<readonly ChatId[]> {
       const result = await pool.query<{ chat_id: string }>(
         "SELECT chat_id FROM allowed_chats ORDER BY chat_id ASC"
       );
-      return result.rows.map((row) => Number(row.chat_id));
+      return result.rows.map((row) => asChatId(Number(row.chat_id)));
     },
   };
 }
@@ -174,7 +182,12 @@ export function createOutboxRepository(pool: Pool): OutboxRepository {
             VALUES ($1::uuid, 'user_plan_submitted', $2, $3::jsonb, $4::uuid, 'pending', 0, NOW(), NOW())
             RETURNING id;
           `,
-          [input.eventId, input.chatId, JSON.stringify(input.payload), input.correlationId]
+          [
+            input.eventId,
+            chatIdToNumber(input.chatId),
+            JSON.stringify(input.payload),
+            input.correlationId,
+          ]
         );
 
         await client.query(
@@ -184,7 +197,7 @@ export function createOutboxRepository(pool: Pool): OutboxRepository {
             ON CONFLICT (user_id)
             DO UPDATE SET current_state = 'default', updated_at = NOW();
           `,
-          [input.chatId]
+          [chatIdToNumber(input.chatId)]
         );
 
         await client.query("COMMIT");
@@ -221,7 +234,7 @@ export function createOutboxRepository(pool: Pool): OutboxRepository {
       );
       return result.rows.map((row) => ({
         id: row.id,
-        chat_id: Number(row.chat_id),
+        chat_id: asChatId(Number(row.chat_id)),
         payload_json: row.payload_json as N8nWebhookPayload,
         correlation_id: row.correlation_id,
         attempt_count: Number(row.attempt_count),
@@ -249,15 +262,10 @@ export function createOutboxRepository(pool: Pool): OutboxRepository {
       );
     },
 
-    async scheduleRetry(
-      id: string,
-      attemptCount: number,
-      nextAttemptAt: Date,
-      lastError: string
-    ): Promise<void> {
+    async scheduleRetry(params: ScheduleRetryParams): Promise<void> {
       await pool.query(
         `UPDATE outbox_events SET status = 'pending', attempt_count = $2, next_attempt_at = $3, last_error = $4 WHERE id = $1::uuid`,
-        [id, attemptCount, nextAttemptAt, lastError]
+        [params.id, params.attemptCount, params.nextAttemptAt, params.lastError]
       );
     },
 

@@ -1,5 +1,6 @@
 import { Context } from "telegraf";
 import { AppConfig } from "../src/config";
+import { asChatId, chatIdToNumber } from "../src/domain";
 import { handleUserTextMessage, handleUserVoiceMessage } from "../src/telegramBot";
 import {
   AllowedChatRepository,
@@ -35,7 +36,7 @@ describe("User state behavior", () => {
     async revokeChat(): Promise<void> {
       // no-op
     },
-    async listAllowedChats(): Promise<number[]> {
+    async listAllowedChats() {
       return [];
     },
   };
@@ -56,7 +57,7 @@ describe("User state behavior", () => {
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
       n8nWebhookSecret: "webhook-secret",
-      masterChatId: 1,
+      masterChatId: asChatId(1),
       voiceBase64MaxBytes: 1024,
       outboxProcessedTtlHours: 72,
       outboxPollIntervalMs: 5000,
@@ -101,13 +102,11 @@ describe("User state behavior", () => {
     });
 
     expect(enqueued).toHaveLength(1);
-    expect(enqueued[0].chatId).toBe(12345);
+    expect(chatIdToNumber(enqueued[0].chatId)).toBe(12345);
     expect(enqueued[0].correlationId).toEqual(expect.any(String));
     expect(enqueued[0].eventId).toEqual(expect.any(String));
-    expect(enqueued[0].payload).toEqual({
-      chatId: 12345,
-      text: "Mój plan działania",
-    });
+    expect(chatIdToNumber(enqueued[0].payload.chatId)).toBe(12345);
+    expect(enqueued[0].payload.text).toBe("Mój plan działania");
     expect(sentReplies.length).toBe(1);
     expect(sentReplies[0]).toContain("przekazuję Twój plan");
   });
@@ -128,7 +127,7 @@ describe("User state behavior", () => {
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
       n8nWebhookSecret: "webhook-secret",
-      masterChatId: 1,
+      masterChatId: asChatId(1),
       voiceBase64MaxBytes: 1024,
       outboxProcessedTtlHours: 72,
       outboxPollIntervalMs: 5000,
@@ -137,8 +136,8 @@ describe("User state behavior", () => {
     };
 
     const userStateRepository: UserStateRepository = {
-      async getUserState(userId: number): Promise<string> {
-        expect(userId).toBe(111);
+      async getUserState(chatId): Promise<string> {
+        expect(chatIdToNumber(chatId)).toBe(111);
         return "awaiting_plan";
       },
       async setUserState(): Promise<void> {
@@ -195,7 +194,7 @@ describe("User state behavior", () => {
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
       n8nWebhookSecret: "webhook-secret",
-      masterChatId: 1,
+      masterChatId: asChatId(1),
       voiceBase64MaxBytes: 1024,
       outboxProcessedTtlHours: 72,
       outboxPollIntervalMs: 5000,
@@ -204,8 +203,8 @@ describe("User state behavior", () => {
     };
 
     const userStateRepository: UserStateRepository = {
-      async getUserState(userId: number): Promise<string> {
-        expect(userId).toBe(777);
+      async getUserState(chatId): Promise<string> {
+        expect(chatIdToNumber(chatId)).toBe(777);
         return "awaiting_plan";
       },
       async setUserState(): Promise<void> {
@@ -240,13 +239,11 @@ describe("User state behavior", () => {
     });
 
     expect(enqueued).toHaveLength(1);
-    expect(enqueued[0].payload).toEqual({
-      chatId: 777,
-      text: "[VOICE]",
-      voiceBase64: downloadedBuffer.toString("base64"),
-      voiceMimeType: "audio/ogg",
-      voiceDurationSeconds: 6,
-    });
+    expect(chatIdToNumber(enqueued[0].payload.chatId)).toBe(777);
+    expect(enqueued[0].payload.text).toBe("[VOICE]");
+    expect(enqueued[0].payload.voiceBase64).toBe(downloadedBuffer.toString("base64"));
+    expect(enqueued[0].payload.voiceMimeType).toBe("audio/ogg");
+    expect(enqueued[0].payload.voiceDurationSeconds).toBe(6);
     expect(sentReplies[0]).toContain("przekazuję Twój plan");
   });
 
@@ -272,7 +269,7 @@ describe("User state behavior", () => {
       internalApiKey: "internal-key",
       n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
       n8nWebhookSecret: "webhook-secret",
-      masterChatId: 1,
+      masterChatId: asChatId(1),
       voiceBase64MaxBytes: 2048,
       outboxProcessedTtlHours: 72,
       outboxPollIntervalMs: 5000,

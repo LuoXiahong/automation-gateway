@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
-from typing import Protocol
+from typing import NewType, Protocol
+
+from pydantic import BaseModel, Field
+
+
+InternalApiKey = NewType("InternalApiKey", str)
+NodeGatewayUrl = NewType("NodeGatewayUrl", str)
 
 
 class HttpClient(Protocol):
     async def post(  # pragma: no cover - protocol definition
         self,
         url: str,
-        json: dict,
-        headers: dict | None = None,
+        json: Mapping[str, object],
+        headers: Mapping[str, str] | None = None,
     ) -> object: ...
 
 
@@ -20,6 +26,11 @@ class HttpClient(Protocol):
 class StressSnapshot:
     stress_value: int
     resting_heart_rate: int | None = None
+
+
+class StressAlertRequest(BaseModel):
+    stressValue: int = Field()
+    restingHeartRate: int | None = Field(default=None)
 
 
 StressProvider = Callable[[], Awaitable[StressSnapshot]]
@@ -31,8 +42,8 @@ COOLDOWN_PERIOD = timedelta(hours=4)
 @dataclass
 class DecisionWorker:
     stress_threshold: int
-    internal_api_key: str
-    node_gateway_url: str
+    internal_api_key: InternalApiKey
+    node_gateway_url: NodeGatewayUrl
     http_client: HttpClient
     stress_provider: StressProvider
     last_alert_time: datetime | None = field(default=None, init=False)
@@ -53,11 +64,11 @@ class DecisionWorker:
 
         url = f"{self.node_gateway_url.rstrip('/')}/api/internal/stress-alert"
 
-        payload: dict[str, int] = {
-            "stressValue": snapshot.stress_value,
-        }
-        if snapshot.resting_heart_rate is not None:
-            payload["restingHeartRate"] = snapshot.resting_heart_rate
+        payload_model = StressAlertRequest(
+            stressValue=snapshot.stress_value,
+            restingHeartRate=snapshot.resting_heart_rate,
+        )
+        payload = payload_model.model_dump(exclude_none=True)
 
         correlation_id = str(uuid.uuid4())
         headers = {

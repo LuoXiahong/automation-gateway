@@ -165,3 +165,28 @@
 
 ---
 
+#### ADR-011: Typy domenowe + „parse, don’t validate” na granicach (2026-03-05)
+
+- **Context**:
+  - W `node-gateway` szeroko używano prymitywów (`number`, `string`) do reprezentowania pojęć domenowych (`chatId`, `userId`, `masterChatId`, payloady do n8n).
+  - Walidacja była rozproszona po kodzie (`typeof`, ręczne parsowanie zmiennych środowiskowych), co utrudniało reasoning i sprzyjało regresjom.
+  - W `biometric-proxy` worker decyzji budował payload do `/api/internal/stress-alert` jako surowy `dict`, bez jawnego modelu kontraktu.
+- **Decision**:
+  - W `node-gateway`:
+    - Wprowadzono **opaque domain types** w `src/domain.ts` (`ChatId`, `UserId` + konwersje `asChatId`, `asUserId`, `chatIdToNumber`, `userIdToNumber`).
+    - Wszystkie istotne interfejsy (np. `AppConfig.masterChatId`, repozytoria w `db.ts`, payload `N8nWebhookPayload`, handlerzy w `telegramBot.ts` i `server.ts`) używają teraz `ChatId` zamiast „gołego” `number`.
+    - Wprowadzono bibliotekę **Zod** jako parser na granicach:
+      - `config.ts` zawiera schemat `envSchema` opisujący wymagane zmienne środowiskowe i liczby (`VOICE_BASE64_MAX_BYTES`, `OUTBOX_*`) z domyślnymi fallbackami na poziomie kodu.
+      - `server.ts` używa schematów `internalMessageSchema` i `stressAlertSchema` do parse-first payloadów HTTP; w razie niepowodzenia zwracany jest `400 Invalid payload` (zachowanie jak przedtem).
+    - Zredukowano złożoność w `telegramBot.ts` i `outboxWorker.ts` przez guard clauses oraz value-object dla retry (`ScheduleRetryParams` zamiast wielu parametrów pozycyjnych).
+  - W `biometric-proxy`:
+    - Dodano `NewType` dla kluczy infrastrukturalnych (`InternalApiKey`, `NodeGatewayUrl`) w `decision.py` i `main.py`.
+    - Payload stress-alert jest budowany przez model **Pydantic** `StressAlertRequest`, który gwarantuje obecność `stressValue` i poprawny kształt opcjonalnego `restingHeartRate`, a następnie serializowany przez `model_dump(exclude_none=True)`.
+- **Consequences**:
+  - Kompilator TypeScript oraz typowanie Pythona (mypy/IDE) lepiej chronią przed podmianą identyfikatorów między kontekstami (np. przypadkowe użycie `userId` tam, gdzie oczekiwany jest `chatId`).
+  - Logika walidacji na wejściu jest **skupiona** w jednym miejscu (schematy Zod / modele Pydantic), a reszta kodu operuje na już sparsowanych, silnie typowanych strukturach („parse, don’t validate”).
+  - Dodanie nowych pól do payloadów lub zmiana sposobu parsowania env wymaga modyfikacji pojedynczego schematu, co zmniejsza ryzyko rozjazdów.
+  - Minimalny overhead runtime (parsowanie Zod/Pydantic) jest akceptowalny w stosunku do zysku na bezpieczeństwie i czytelności kontraktów.
+
+---
+

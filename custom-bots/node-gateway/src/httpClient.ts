@@ -1,4 +1,5 @@
 import fetch, { Response } from "node-fetch";
+import type { ChatId } from "./domain.js";
 
 /** AbortSignal constructor with optional timeout (Node 18+). */
 interface AbortSignalWithTimeout {
@@ -7,11 +8,11 @@ interface AbortSignalWithTimeout {
 
 /** Payload sent to n8n webhook for user plan (text or voice). */
 export interface N8nWebhookPayload {
-  chatId: number;
-  text: string;
-  voiceBase64?: string;
-  voiceMimeType?: string;
-  voiceDurationSeconds?: number;
+  readonly chatId: ChatId;
+  readonly text: string;
+  readonly voiceBase64?: string;
+  readonly voiceMimeType?: string;
+  readonly voiceDurationSeconds?: number;
 }
 
 export interface HttpClient {

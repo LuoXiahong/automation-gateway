@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
-from app.decision import DecisionWorker
+from app.decision import DecisionWorker, InternalApiKey, NodeGatewayUrl
 from app.main import _extract_resting_hr, _extract_stress_value
 
 
@@ -52,8 +52,8 @@ async def test_given_stress_75_when_worker_runs_then_posts_to_node_gateway() -> 
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key="secret-key",
-        node_gateway_url="http://node-gateway:8000",
+        internal_api_key=InternalApiKey("secret-key"),
+        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
         http_client=http_client,
         stress_provider=stress_provider_75,
     )
@@ -87,8 +87,8 @@ async def test_given_stress_below_threshold_when_worker_runs_then_does_not_post(
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key="secret-key",
-        node_gateway_url="http://node-gateway:8000",
+        internal_api_key=InternalApiKey("secret-key"),
+        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
         http_client=http_client,
         stress_provider=stress_provider_60,
     )
@@ -109,8 +109,8 @@ async def test_cooldown_4h_blocks_second_alert() -> None:
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key="secret-key",
-        node_gateway_url="http://node-gateway:8000",
+        internal_api_key=InternalApiKey("secret-key"),
+        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
         http_client=http_client,
         stress_provider=stress_provider_75,
     )
@@ -133,8 +133,8 @@ async def test_alert_payload_includes_resting_heart_rate() -> None:
     http_client = FakeHttpClient()
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key="secret-key",
-        node_gateway_url="http://node-gateway:8000",
+        internal_api_key=InternalApiKey("secret-key"),
+        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
         http_client=http_client,
         stress_provider=make_stress_provider(75, 55),
     )

@@ -12,7 +12,7 @@ from fastapi import FastAPI
 from garminconnect import Garmin
 
 from .config import Settings
-from .decision import DecisionWorker, StressSnapshot
+from .decision import DecisionWorker, InternalApiKey, NodeGatewayUrl, StressSnapshot
 from .errors import (
     GarminAuthError,
     GarminTransientError,
@@ -95,8 +95,8 @@ async def lifespan(_: FastAPI) -> AsyncGenerator[None, None]:
 
     worker = DecisionWorker(
         stress_threshold=settings.stress_threshold,
-        internal_api_key=settings.internal_api_key,
-        node_gateway_url=settings.node_gateway_url,
+        internal_api_key=InternalApiKey(settings.internal_api_key),
+        node_gateway_url=NodeGatewayUrl(settings.node_gateway_url),
         http_client=http_client,
         stress_provider=create_stress_provider(settings),
     )

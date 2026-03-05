@@ -72,5 +72,10 @@ async function scheduleRetryOrDeadLetter(
     return;
   }
   const at = nextAttemptAt(nextCount);
-  await deps.outboxRepository.scheduleRetry(row.id, nextCount, at, lastError);
+  await deps.outboxRepository.scheduleRetry({
+    id: row.id,
+    attemptCount: nextCount,
+    nextAttemptAt: at,
+    lastError,
+  });
 }

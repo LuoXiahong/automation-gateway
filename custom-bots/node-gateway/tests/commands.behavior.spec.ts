@@ -1,5 +1,6 @@
 import type { Context } from "telegraf";
 import { AppConfig } from "../src/config";
+import { asChatId, chatIdToNumber } from "../src/domain";
 import { AllowedChatRepository, UserStateRepository } from "../src/db";
 import {
   handleAllowedListCommand,
@@ -55,7 +56,7 @@ describe("Bot command handlers", () => {
     internalApiKey: "internal-key",
     n8nWebhookUrl: "http://n8n:5678/webhook/ai-gateway",
     n8nWebhookSecret: "webhook-secret",
-    masterChatId: 1,
+    masterChatId: asChatId(1),
     voiceBase64MaxBytes: 1024,
     outboxProcessedTtlHours: 72,
     outboxPollIntervalMs: 5000,
@@ -70,25 +71,26 @@ describe("Bot command handlers", () => {
     async getUserState(): Promise<string> {
       return storedState?.state ?? "default";
     },
-    async setUserState(userId: number, newState: string): Promise<void> {
-      storedState = { userId, state: newState };
+    async setUserState(chatId, newState: string): Promise<void> {
+      storedState = { userId: chatIdToNumber(chatId), state: newState };
     },
   };
 
   const allowedChatRepository: AllowedChatRepository = {
-    async isAllowed(chatId: number): Promise<boolean> {
-      return allowedChats.includes(chatId);
+    async isAllowed(chatId): Promise<boolean> {
+      return allowedChats.includes(chatIdToNumber(chatId));
     },
-    async allowChat(chatId: number): Promise<void> {
-      if (!allowedChats.includes(chatId)) {
-        allowedChats.push(chatId);
+    async allowChat(chatId): Promise<void> {
+      const n = chatIdToNumber(chatId);
+      if (!allowedChats.includes(n)) {
+        allowedChats.push(n);
       }
     },
-    async revokeChat(chatId: number): Promise<void> {
-      allowedChats = allowedChats.filter((id) => id !== chatId);
+    async revokeChat(chatId): Promise<void> {
+      allowedChats = allowedChats.filter((id) => id !== chatIdToNumber(chatId));
     },
-    async listAllowedChats(): Promise<number[]> {
-      return [...allowedChats];
+    async listAllowedChats() {
+      return allowedChats.map((id) => asChatId(id));
     },
   };
 

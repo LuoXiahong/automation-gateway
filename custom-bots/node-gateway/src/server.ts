@@ -1,24 +1,26 @@
 import Fastify, { FastifyInstance } from "fastify";
+import { z } from "zod";
 import { AppConfig } from "./config.js";
 import { AllowedChatRepository, UserStateRepository } from "./db.js";
+import { asChatId, chatIdToNumber } from "./domain.js";
 import { Telegraf, Context } from "telegraf";
 
-interface InternalMessageBody {
-  chatId: number;
-  text: string;
-  newState?: string;
-}
+const internalMessageSchema = z.object({
+  chatId: z.number().int(),
+  text: z.string(),
+  newState: z.string().optional(),
+});
 
-interface StressAlertBody {
-  stressValue: number;
-  restingHeartRate?: number;
-}
+const stressAlertSchema = z.object({
+  stressValue: z.number(),
+  restingHeartRate: z.number().optional(),
+});
 
 export interface ServerDependencies {
-  config: AppConfig;
-  userStateRepository: UserStateRepository;
-  allowedChatRepository: AllowedChatRepository;
-  bot: Telegraf<Context>;
+  readonly config: AppConfig;
+  readonly userStateRepository: UserStateRepository;
+  readonly allowedChatRepository: AllowedChatRepository;
+  readonly bot: Telegraf<Context>;
 }
 
 export function createServer(deps: ServerDependencies): FastifyInstance {
@@ -26,55 +28,49 @@ export function createServer(deps: ServerDependencies): FastifyInstance {
     logger: true,
   });
 
-  app.post<{
-    Body: InternalMessageBody;
-  }>("/api/internal/message", async (request, reply) => {
+  app.post("/api/internal/message", async (request, reply) => {
     const apiKey = request.headers["x-internal-api-key"];
     if (apiKey !== deps.config.internalApiKey) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
 
-    const { chatId, text, newState } = request.body;
-
-    if (typeof chatId !== "number" || typeof text !== "string") {
+    const parsed = internalMessageSchema.safeParse(request.body);
+    if (!parsed.success) {
       return reply.status(400).send({ error: "Invalid payload" });
     }
 
-    await deps.bot.telegram.sendMessage(chatId, text);
+    const { chatId, text, newState } = parsed.data;
+    const chatIdDomain = asChatId(chatId);
+    await deps.bot.telegram.sendMessage(chatIdToNumber(chatIdDomain), text);
 
     if (newState) {
-      await deps.userStateRepository.setUserState(chatId, newState);
+      await deps.userStateRepository.setUserState(chatIdDomain, newState);
     }
 
     return reply.status(200).send({ status: "ok" });
   });
 
-  app.post<{
-    Body: StressAlertBody;
-  }>("/api/internal/stress-alert", async (request, reply) => {
+  app.post("/api/internal/stress-alert", async (request, reply) => {
     const apiKey = request.headers["x-internal-api-key"];
     if (apiKey !== deps.config.internalApiKey) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
 
-    const { stressValue, restingHeartRate } = request.body;
-
-    if (typeof stressValue !== "number" || Number.isNaN(stressValue)) {
+    const parsed = stressAlertSchema.safeParse(request.body);
+    if (!parsed.success || Number.isNaN(parsed.data.stressValue)) {
       return reply.status(400).send({ error: "Invalid payload" });
     }
-    if (
-      restingHeartRate !== undefined &&
-      (typeof restingHeartRate !== "number" || Number.isNaN(restingHeartRate))
-    ) {
+    const { stressValue, restingHeartRate } = parsed.data;
+    if (restingHeartRate !== undefined && Number.isNaN(restingHeartRate)) {
       return reply.status(400).send({ error: "Invalid payload" });
     }
 
     const recipients = new Set<number>();
-    recipients.add(deps.config.masterChatId);
+    recipients.add(chatIdToNumber(deps.config.masterChatId));
 
     const allowedChats = await deps.allowedChatRepository.listAllowedChats();
-    for (const chatId of allowedChats) {
-      recipients.add(chatId);
+    for (const cid of allowedChats) {
+      recipients.add(chatIdToNumber(cid));
     }
 
     let message =
@@ -86,9 +82,10 @@ export function createServer(deps: ServerDependencies): FastifyInstance {
     }
 
     await Promise.all(
-      Array.from(recipients).map(async (chatId) => {
-        await deps.bot.telegram.sendMessage(chatId, message);
-        await deps.userStateRepository.setUserState(chatId, "awaiting_plan");
+      Array.from(recipients).map(async (chatIdNum) => {
+        const chatIdDomain = asChatId(chatIdNum);
+        await deps.bot.telegram.sendMessage(chatIdNum, message);
+        await deps.userStateRepository.setUserState(chatIdDomain, "awaiting_plan");
       })
     );
 
