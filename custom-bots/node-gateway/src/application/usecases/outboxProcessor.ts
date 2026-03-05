@@ -1,6 +1,8 @@
 import type { AppConfig } from "../../infrastructure/config.js";
 import type { OutboxEventRow, OutboxRepository } from "../ports.js";
 import type { HttpClient } from "../../infrastructure/httpClient.js";
+import { gatewayMetrics } from "../../infrastructure/metrics.js";
+import { getActiveTraceContext } from "../../infrastructure/tracing.js";
 
 const BASE_BACKOFF_MS = 5_000;
 const MAX_BACKOFF_MS = 60 * 60 * 1000;
@@ -39,6 +41,19 @@ async function processOne(deps: OutboxWorkerDeps, row: OutboxEventRow): Promise<
 
     if (response.ok) {
       await deps.outboxRepository.markProcessed(row.id);
+      gatewayMetrics.outboxProcessedTotal.inc();
+      const ctx = getActiveTraceContext();
+      // structured log for successful delivery
+      // eslint-disable-next-line no-console
+      console.info(
+        JSON.stringify({
+          msg: "outbox processed",
+          eventId: row.id,
+          correlationId: row.correlation_id,
+          traceId: ctx?.traceId,
+          spanId: ctx?.spanId,
+        })
+      );
       return;
     }
 
@@ -51,6 +66,19 @@ async function processOne(deps: OutboxWorkerDeps, row: OutboxEventRow): Promise<
         `HTTP ${status}: ${bodyText.slice(0, 500)}`,
         "client_error"
       );
+      gatewayMetrics.outboxFailedTotal.inc();
+      const ctx = getActiveTraceContext();
+      // eslint-disable-next-line no-console
+      console.warn(
+        JSON.stringify({
+          msg: "outbox client error",
+          eventId: row.id,
+          correlationId: row.correlation_id,
+          status,
+          traceId: ctx?.traceId,
+          spanId: ctx?.spanId,
+        })
+      );
       return;
     }
 
@@ -58,6 +86,18 @@ async function processOne(deps: OutboxWorkerDeps, row: OutboxEventRow): Promise<
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     await scheduleRetryOrDeadLetter(deps, row, message);
+    const ctx = getActiveTraceContext();
+    // eslint-disable-next-line no-console
+    console.error(
+      JSON.stringify({
+        msg: "outbox exception",
+        eventId: row.id,
+        correlationId: row.correlation_id,
+        error: message,
+        traceId: ctx?.traceId,
+        spanId: ctx?.spanId,
+      })
+    );
   }
 }
 
@@ -69,6 +109,7 @@ async function scheduleRetryOrDeadLetter(
   const nextCount = row.attempt_count + 1;
   if (nextCount > deps.config.outboxMaxRetries) {
     await deps.outboxRepository.markDeadLetter(row.id, lastError);
+    gatewayMetrics.outboxDeadLetterTotal.inc();
     return;
   }
   const at = nextAttemptAt(nextCount);
@@ -78,4 +119,5 @@ async function scheduleRetryOrDeadLetter(
     nextAttemptAt: at,
     lastError,
   });
+  gatewayMetrics.outboxRetryScheduledTotal.inc();
 }

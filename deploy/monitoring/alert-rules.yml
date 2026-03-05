@@ -1,0 +1,23 @@
+groups:
+  - name: node-gateway-outbox
+    rules:
+      - alert: OutboxDeadLetterDetected
+        expr: node_gateway_outbox_dead_letter_total > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Dead-letter events detected in node-gateway outbox"
+          description: "node_gateway_outbox_dead_letter_total is > 0. Investigate failed deliveries to n8n."
+
+  - name: biometric-worker-health
+    rules:
+      - alert: BiometricWorkerErrorSpike
+        expr: increase(biometric_worker_errors_total[10m]) > 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Biometric worker is experiencing errors"
+          description: "Errors observed in biometric decision worker loop over the last 10 minutes."
+

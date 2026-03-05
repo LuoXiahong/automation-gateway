@@ -1,4 +1,4 @@
-import Fastify, { FastifyInstance } from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { z } from "zod";
 import { AppConfig } from "../infrastructure/config.js";
 import { asChatId, chatIdToNumber } from "../domain.js";
@@ -12,6 +12,8 @@ import {
   handleInternalMessage,
   handleStressAlertBroadcast,
 } from "../application/usecases/internalApi.js";
+import { gatewayMetrics } from "../infrastructure/metrics.js";
+import { trace } from "@opentelemetry/api";
 
 const internalMessageSchema = z.object({
   chatId: z.number().int(),
@@ -34,6 +36,38 @@ export interface ServerDependencies {
 export function createServer(deps: ServerDependencies): FastifyInstance {
   const app = Fastify({
     logger: true,
+  });
+
+  app.addHook("onRequest", async (request) => {
+    const corr = request.headers["x-correlation-id"];
+    if (typeof corr === "string" && corr.length > 0) {
+      const span = trace.getActiveSpan();
+      span?.setAttribute("http.request.header.x_correlation_id", corr);
+    }
+  });
+
+  app.addHook("onResponse", async (request, reply) => {
+    const routeConfig = request.routeConfig;
+    const routePath =
+      typeof routeConfig?.url === "string" && routeConfig.url.length > 0
+        ? routeConfig.url
+        : request.routeOptions?.url ?? request.raw.url ?? "unknown";
+
+    const statusCode = reply.statusCode;
+
+    gatewayMetrics.httpRequestDurationSeconds
+      .labels(request.method, routePath, String(statusCode))
+      .observe(reply.getResponseTime() / 1000);
+  });
+
+  app.get("/health", async (_request, reply) => {
+    return reply.status(200).send({ status: "ok" });
+  });
+
+  app.get("/metrics", async (_request, reply) => {
+    const body = await gatewayMetrics.registry.metrics();
+    reply.header("content-type", gatewayMetrics.registry.contentType);
+    return reply.send(body);
   });
 
   app.post("/api/internal/message", async (request, reply) => {

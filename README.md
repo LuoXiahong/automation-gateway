@@ -204,6 +204,41 @@ Dzięki temu:
 
 ---
 
+## Monitoring i obserwowalność
+
+- **Metryki**:
+  - `node-gateway`:
+    - Fastify `/health` oraz `/metrics` (Prometheus, histogram latency + metryki outbox).
+  - `biometric-proxy`:
+    - FastAPI `/health` oraz `/metrics` z metrykami pętli workera i liczby wysłanych alertów.
+- **Stack monitoringu (Prometheus + Grafana + Alertmanager)**:
+  - Zdefiniowany w `deploy/docker-compose.yml` jako dodatkowe serwisy uruchamiane razem z gatewayem.
+  - Konfiguracja w `deploy/monitoring/`:
+    - `prometheus.yml` – scrape `node-gateway:8000/metrics`, `biometric-proxy:8000/metrics` oraz samego Prometheusa.
+    - `alert-rules.yml` – pierwsze reguły (np. dead-letter w outboxie, błędy workera biometrów).
+    - `alertmanager.yml` – domyślnie "null" receiver (do dalszej konfiguracji pod Slacka / maila).
+  - Grafana korzysta z provisioning-u z repo:
+    - `deploy/monitoring/grafana/provisioning/datasources/datasource.yml` – datasource Prometheus.
+    - `deploy/monitoring/grafana/provisioning/dashboards/dashboards.yml` – provider ładujący dashboardy z `deploy/monitoring/grafana/dashboards/`.
+    - `deploy/monitoring/grafana/dashboards/gateway_biometric.json` – przykładowy dashboard (układ paneli możesz rozwijać w Git).
+- **Lokalne odpalenie monitoringu** (razem z gatewayem):
+
+```bash
+cd deploy
+docker compose up -d
+# Prometheus: http://localhost:9090
+# Grafana:    http://localhost:3000  (admin/admin lub wartości z GRAFANA_ADMIN_*)
+```
+
+- **Jak weryfikować dashboardy** (skrót):
+  - Wygeneruj ruch: normalny przepływ planu, wymuś błąd n8n / node-gateway / Garmina.
+  - Sprawdź czy:
+    - liczniki retry / dead-letter / błędów rosną zgodnie z oczekiwaniem,
+    - alerty z `alert-rules.yml` faktycznie się wyzwalają,
+    - wartości na dashboardzie zgadzają się z danymi z Postgresa / logów.
+
+---
+
 ## Dalsza rozbudowa
 
 - Dodaj kolejne mikroserwisy (np. integracje z innymi dostawcami biometrów).

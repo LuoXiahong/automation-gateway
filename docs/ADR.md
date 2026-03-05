@@ -215,3 +215,22 @@
   - Backward-compat re-exports umożliwiają etapową migrację.
 
 ---
+
+#### ADR-013: Observability stack (metrics, dashboards, alerts) (2026-03-05)
+
+- **Context**:
+  - System opiera się na asynchronicznym outboxie, pętli decision-workera i wewnętrznym API między `biometric-proxy` a `node-gateway`.
+  - Brakowało spójnego, wersjonowanego w repo stacku obserwowalności i jasnego procesu weryfikacji dashboardów.
+- **Decision**:
+  - Dodano metryki Prometheus po obu stronach:
+    - `node-gateway` – HTTP histogram (`node_gateway_http_request_duration_seconds`) oraz metryki outbox (`node_gateway_outbox_*`).
+    - `biometric-proxy` – metryki pętli workera (`biometric_worker_*`) i licznik wysłanych alertów (`biometric_alerts_published_total`).
+  - Rozszerzono `deploy/docker-compose.yml` o serwisy Prometheus, Alertmanager i Grafana.
+  - Konfiguracja Prometheusa i reguł alertów jest trzymana jako kod w `deploy/monitoring/prometheus.yml` oraz `deploy/monitoring/alert-rules.yml`.
+  - Dashboardy Grafany i provisioning są wersjonowane w repo (`deploy/monitoring/grafana/...`) i ładowane automatycznie przy starcie kontenera.
+- **Consequences**:
+  - Pełny stack monitoringu (metryki + alerty + dashboardy) jest deklaratywny, powtarzalny i podlega code review.
+  - Można odtworzyć i zweryfikować monitoring w dowolnym środowisku jednym `docker compose up -d`.
+  - Alerty krytyczne (np. dead-letter w outboxie) są definiowane jako kod i łatwe do utrzymania.
+
+---

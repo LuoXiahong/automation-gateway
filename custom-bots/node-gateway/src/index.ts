@@ -1,3 +1,4 @@
+import { setupTracing } from "./infrastructure/tracing.js";
 import { loadConfig } from "./infrastructure/config.js";
 import {
   createAllowedChatRepository,
@@ -13,6 +14,8 @@ import { createServer } from "./interfaces/httpServer.js";
 import fetch from "node-fetch";
 
 async function bootstrap(): Promise<void> {
+  setupTracing();
+
   const config = loadConfig();
 
   const pool = createPool(config.databaseUrl);
