@@ -1,7 +1,7 @@
 import type { Context } from "telegraf";
 import { AppConfig } from "../src/config";
 import { asChatId, chatIdToNumber } from "../src/domain";
-import { AllowedChatRepository, UserStateRepository } from "../src/db";
+import type { AllowedChatRepository, UserStateRepository } from "../src/application/ports";
 import {
   handleAllowedListCommand,
   handleAllowHereCommand,

@@ -34,3 +34,12 @@ quote-style = "double"
 asyncio_mode = "auto"
 testpaths = ["tests"]
 addopts = "-v --cov=app --cov-report=term-missing --cov-fail-under=60"
+
+[tool.coverage.run]
+omit = [
+    "app/main.py",
+    "app/errors.py",
+    "app/config.py",
+    "app/decision.py",
+    "app/interfaces/*",
+]

@@ -1,147 +1,158 @@
+"""BDD-style tests for DecisionWorker use-case (pure application layer)."""
 from __future__ import annotations
 
-import os
-import sys
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+from app.application.use_cases.decision_worker import DecisionWorker
+from app.domain.model import COOLDOWN_PERIOD, StressSnapshot
+from app.infrastructure.garmin.stress_provider import _extract_resting_hr, _extract_stress_value
 
-from app.decision import DecisionWorker, InternalApiKey, NodeGatewayUrl
-from app.main import _extract_resting_hr, _extract_stress_value
+
+class FakeClock:
+    def __init__(self, start: datetime | None = None) -> None:
+        self._now = start or datetime(2025, 6, 1, 12, 0, tzinfo=timezone.utc)
+
+    def now_utc(self) -> datetime:
+        return self._now
+
+    def advance(self, delta: timedelta) -> None:
+        self._now += delta
 
 
-class FakeHttpClient:
+class FakeAlertPublisher:
     def __init__(self) -> None:
-        self.requests: list[dict[str, Any]] = []
+        self.published: list[StressSnapshot] = []
 
-    async def post(
-        self,
-        url: str,
-        json: dict[str, Any],
-        headers: dict[str, str] | None = None,
-    ) -> object:
-        self.requests.append({"url": url, "json": json, "headers": headers})
-        return object()
+    async def publish(self, snapshot: StressSnapshot) -> None:
+        self.published.append(snapshot)
 
 
 def make_stress_provider(stress: int, resting_hr: int | None = None):
-    async def provider():
-        from app.decision import StressSnapshot
-
+    async def provider() -> StressSnapshot:
         return StressSnapshot(stress_value=stress, resting_heart_rate=resting_hr)
 
     return provider
 
 
-async def stress_provider_75():
-    from app.decision import StressSnapshot
-
-    return StressSnapshot(stress_value=75, resting_heart_rate=None)
-
-
 @pytest.mark.asyncio
-async def test_given_stress_75_when_worker_runs_then_posts_to_node_gateway() -> None:
+async def test_given_stress_75_when_worker_runs_then_publishes_alert() -> None:
     """
-    Given stress is 75,
+    Given stress is 75 (above threshold 70),
     When worker runs,
-    Then it sends HTTP POST to node-gateway.
+    Then it publishes an alert via AlertPublisherPort.
     """
-    http_client = FakeHttpClient()
+    publisher = FakeAlertPublisher()
+    clock = FakeClock()
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key=InternalApiKey("secret-key"),
-        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
-        http_client=http_client,
-        stress_provider=stress_provider_75,
+        stress_provider=make_stress_provider(75),
+        alert_publisher=publisher,
+        clock=clock,
     )
 
     await worker.run_once()
 
-    assert len(http_client.requests) == 1
-    request = http_client.requests[0]
-
-    assert request["url"] == "http://node-gateway:8000/api/internal/stress-alert"
-    assert request["json"]["stressValue"] == 75
-    assert request["headers"]["x-internal-api-key"] == "secret-key"
-    assert "x-correlation-id" in request["headers"]
-    assert "restingHeartRate" not in request["json"]
-
-
-async def stress_provider_60():
-    from app.decision import StressSnapshot
-
-    return StressSnapshot(stress_value=60, resting_heart_rate=None)
+    assert len(publisher.published) == 1
+    assert publisher.published[0].stress_value == 75
 
 
 @pytest.mark.asyncio
-async def test_given_stress_below_threshold_when_worker_runs_then_does_not_post() -> None:
+async def test_given_stress_below_threshold_when_worker_runs_then_does_not_publish() -> None:
     """
-    Given stress is 60,
+    Given stress is 60 (below threshold 70),
     When worker runs,
-    Then it does not send HTTP POST to node-gateway.
+    Then it does not publish any alert.
     """
-    http_client = FakeHttpClient()
+    publisher = FakeAlertPublisher()
+    clock = FakeClock()
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key=InternalApiKey("secret-key"),
-        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
-        http_client=http_client,
-        stress_provider=stress_provider_60,
+        stress_provider=make_stress_provider(60),
+        alert_publisher=publisher,
+        clock=clock,
     )
 
     await worker.run_once()
 
-    assert http_client.requests == []
+    assert publisher.published == []
 
 
 @pytest.mark.asyncio
 async def test_cooldown_4h_blocks_second_alert() -> None:
     """
     Given stress is above threshold and persists,
-    When worker runs multiple times within 4 hours,
-    Then only the first run sends HTTP POST; second run does not post (cooldown).
+    When worker runs twice within 4h window,
+    Then only the first run publishes; second is blocked by cooldown.
     """
-    http_client = FakeHttpClient()
+    publisher = FakeAlertPublisher()
+    clock = FakeClock()
 
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key=InternalApiKey("secret-key"),
-        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
-        http_client=http_client,
-        stress_provider=stress_provider_75,
+        stress_provider=make_stress_provider(75),
+        alert_publisher=publisher,
+        clock=clock,
     )
 
     await worker.run_once()
-    assert len(http_client.requests) == 1
-    assert http_client.requests[0]["json"]["stressValue"] == 75
+    assert len(publisher.published) == 1
 
+    clock.advance(timedelta(hours=1))
     await worker.run_once()
-    assert len(http_client.requests) == 1, "Second run within cooldown must not send another alert"
+    assert len(publisher.published) == 1, "Second run within cooldown must not publish"
 
 
 @pytest.mark.asyncio
-async def test_alert_payload_includes_resting_heart_rate() -> None:
+async def test_cooldown_expires_allows_second_alert() -> None:
     """
-    Given stress provider returns stress and resting heart rate,
-    When worker runs and posts alert,
-    Then payload includes restingHeartRate.
+    Given stress is above threshold,
+    When worker runs after cooldown period (4h+) has elapsed,
+    Then it publishes a second alert.
     """
-    http_client = FakeHttpClient()
+    publisher = FakeAlertPublisher()
+    clock = FakeClock()
+
     worker = DecisionWorker(
         stress_threshold=70,
-        internal_api_key=InternalApiKey("secret-key"),
-        node_gateway_url=NodeGatewayUrl("http://node-gateway:8000"),
-        http_client=http_client,
-        stress_provider=make_stress_provider(75, 55),
+        stress_provider=make_stress_provider(80),
+        alert_publisher=publisher,
+        clock=clock,
     )
+
     await worker.run_once()
-    assert len(http_client.requests) == 1
-    assert http_client.requests[0]["json"]["stressValue"] == 75
-    assert http_client.requests[0]["json"]["restingHeartRate"] == 55
+    assert len(publisher.published) == 1
+
+    clock.advance(COOLDOWN_PERIOD + timedelta(minutes=1))
+    await worker.run_once()
+    assert len(publisher.published) == 2
+
+
+@pytest.mark.asyncio
+async def test_alert_snapshot_includes_resting_heart_rate() -> None:
+    """
+    Given stress provider returns stress and resting heart rate,
+    When worker publishes alert,
+    Then the snapshot includes restingHeartRate.
+    """
+    publisher = FakeAlertPublisher()
+    clock = FakeClock()
+
+    worker = DecisionWorker(
+        stress_threshold=70,
+        stress_provider=make_stress_provider(75, 55),
+        alert_publisher=publisher,
+        clock=clock,
+    )
+
+    await worker.run_once()
+    assert len(publisher.published) == 1
+    assert publisher.published[0].stress_value == 75
+    assert publisher.published[0].resting_heart_rate == 55
 
 
 def test_given_response_with_all_day_stress_when_parsing_then_returns_summary_value() -> None:
@@ -151,10 +162,7 @@ def test_given_response_with_all_day_stress_when_parsing_then_returns_summary_va
     Then returns that value as integer.
     """
     raw: dict[str, Any] = {"allDayStress": 72.5}
-
-    value = _extract_stress_value(raw)
-
-    assert value == 72
+    assert _extract_stress_value(raw) == 72
 
 
 def test_given_response_with_stress_values_list_when_parsing_then_returns_maximum() -> None:
@@ -170,10 +178,7 @@ def test_given_response_with_stress_values_list_when_parsing_then_returns_maximu
             {"value": 80},
         ]
     }
-
-    value = _extract_stress_value(raw)
-
-    assert value == 80
+    assert _extract_stress_value(raw) == 80
 
 
 def test_given_unknown_response_shape_when_parsing_then_returns_zero() -> None:
@@ -183,30 +188,14 @@ def test_given_unknown_response_shape_when_parsing_then_returns_zero() -> None:
     Then returns zero as safe fallback.
     """
     raw: dict[str, Any] = {"unexpected": "structure"}
-
-    value = _extract_stress_value(raw)
-
-    assert value == 0
+    assert _extract_stress_value(raw) == 0
 
 
 def test_given_response_with_resting_heart_rate_when_parsing_then_returns_value() -> None:
-    """
-    Given Garmin response with restingHeartRate,
-    When parsing,
-    Then returns that value as integer.
-    """
     raw: dict[str, Any] = {"restingHeartRate": 55}
-
-    value = _extract_resting_hr(raw)
-
-    assert value == 55
+    assert _extract_resting_hr(raw) == 55
 
 
 def test_given_response_without_resting_heart_rate_when_parsing_then_returns_none() -> None:
-    """
-    Given response without restingHeartRate key or invalid type,
-    When parsing,
-    Then returns None.
-    """
     assert _extract_resting_hr({"other": 1}) is None
     assert _extract_resting_hr({"restingHeartRate": "invalid"}) is None

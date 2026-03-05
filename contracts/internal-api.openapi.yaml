@@ -1,0 +1,155 @@
+openapi: 3.0.3
+info:
+  title: Internal Automation API
+  version: 1.0.0
+  description: >
+    Internal contract between biometric-proxy (producer) and node-gateway (consumer)
+    for stress alerts and internal messages.
+
+paths:
+  /api/internal/stress-alert:
+    post:
+      summary: Publish stress alert event
+      operationId: postStressAlert
+      tags:
+        - internal
+      parameters:
+        - name: x-internal-api-key
+          in: header
+          required: true
+          schema:
+            type: string
+        - name: x-correlation-id
+          in: header
+          required: true
+          description: Correlates alert across services and logs
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/StressAlertRequest"
+      responses:
+        "200":
+          description: Alert accepted and broadcast to recipients
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StressAlertResponse"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized (invalid internal API key)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api/internal/message:
+    post:
+      summary: Send internal message to Telegram chat
+      operationId: postInternalMessage
+      tags:
+        - internal
+      parameters:
+        - name: x-internal-api-key
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/InternalMessageRequest"
+      responses:
+        "200":
+          description: Message sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "400":
+          description: Invalid payload
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: Unauthorized (invalid internal API key)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+components:
+  schemas:
+    StressAlertRequest:
+      type: object
+      required:
+        - stressValue
+      properties:
+        stressValue:
+          type: number
+          format: float
+          description: Aggregated stress metric (e.g. from Garmin)
+        restingHeartRate:
+          type: number
+          format: float
+          description: Optional resting heart rate associated with the alert
+
+    StressAlertResponse:
+      type: object
+      required:
+        - status
+        - recipients
+      properties:
+        status:
+          type: string
+          enum: [ok]
+        recipients:
+          type: array
+          items:
+            type: integer
+          description: Telegram chat ids that received the alert
+
+    InternalMessageRequest:
+      type: object
+      required:
+        - chatId
+        - text
+      properties:
+        chatId:
+          type: integer
+          format: int64
+        text:
+          type: string
+        newState:
+          type: string
+          description: Optional new user state to set after sending the message
+
+    OkResponse:
+      type: object
+      required:
+        - status
+      properties:
+        status:
+          type: string
+          enum: [ok]
+
+    ErrorResponse:
+      type: object
+      required:
+        - error
+      properties:
+        error:
+          type: string
+

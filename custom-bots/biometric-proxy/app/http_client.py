@@ -4,7 +4,7 @@ from typing import Any
 
 import httpx
 
-from .errors import (
+from app.domain.errors import (
     NodeGatewayPermanentError,
     NodeGatewayTransientError,
     NodeGatewayUnauthorizedError,

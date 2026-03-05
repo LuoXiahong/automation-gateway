@@ -2,7 +2,7 @@ import { FastifyInstance } from "fastify";
 import { createServer } from "../src/server";
 import { AppConfig } from "../src/config";
 import { asChatId, chatIdToNumber } from "../src/domain";
-import { AllowedChatRepository, UserStateRepository } from "../src/db";
+import type { AllowedChatRepository, UserStateRepository } from "../src/application/ports";
 import { Telegraf, Context } from "telegraf";
 
 class FakeTelegram {

@@ -1,17 +1,12 @@
-"""Tests for AsyncHttpClient status handling and custom exceptions."""
-
+"""Tests for AsyncHttpClient (infrastructure adapter) status handling."""
 from __future__ import annotations
 
-import os
-import sys
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-
-from app.errors import (
+from app.domain.errors import (
     NodeGatewayPermanentError,
     NodeGatewayTransientError,
     NodeGatewayUnauthorizedError,

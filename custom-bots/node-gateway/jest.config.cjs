@@ -11,7 +11,11 @@ module.exports = {
   },
   forceExit: true,
   collectCoverage: true,
-  collectCoverageFrom: ["src/telegramBot.ts", "src/server.ts"],
+  collectCoverageFrom: [
+    "src/interfaces/**/*.ts",
+    "src/application/**/*.ts",
+    "src/domain.ts",
+  ],
   coverageThreshold: {
     global: {
       branches: 50,

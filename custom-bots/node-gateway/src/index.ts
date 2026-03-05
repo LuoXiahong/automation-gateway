@@ -1,15 +1,15 @@
-import { loadConfig } from "./config.js";
+import { loadConfig } from "./infrastructure/config.js";
 import {
   createAllowedChatRepository,
   createOutboxRepository,
   createPool,
   createUserStateRepository,
   runMigrations,
-} from "./db.js";
-import { createHttpClient } from "./httpClient.js";
-import { runOutboxTick } from "./outboxWorker.js";
-import { createBot } from "./telegramBot.js";
-import { createServer } from "./server.js";
+} from "./infrastructure/persistence.js";
+import { createHttpClient } from "./infrastructure/httpClient.js";
+import { runOutboxTick } from "./application/usecases/outboxProcessor.js";
+import { createBot } from "./interfaces/telegramBot.js";
+import { createServer } from "./interfaces/httpServer.js";
 import fetch from "node-fetch";
 
 async function bootstrap(): Promise<void> {

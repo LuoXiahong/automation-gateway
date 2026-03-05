@@ -1,6 +1,6 @@
 import { AppConfig } from "../src/config";
 import { asChatId, chatIdToNumber } from "../src/domain";
-import { AllowedChatRepository } from "../src/db";
+import type { AllowedChatRepository } from "../src/application/ports";
 import { authorizeContext } from "../src/telegramBot";
 import type { Context } from "telegraf";
 

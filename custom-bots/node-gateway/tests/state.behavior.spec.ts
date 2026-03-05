@@ -2,12 +2,12 @@ import { Context } from "telegraf";
 import { AppConfig } from "../src/config";
 import { asChatId, chatIdToNumber } from "../src/domain";
 import { handleUserTextMessage, handleUserVoiceMessage } from "../src/telegramBot";
-import {
+import type {
   AllowedChatRepository,
   EnqueuePlanInput,
   OutboxRepository,
   UserStateRepository,
-} from "../src/db";
+} from "../src/application/ports";
 
 interface TestContext {
   chat: { id: number };

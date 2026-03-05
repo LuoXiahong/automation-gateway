@@ -190,3 +190,28 @@
 
 ---
 
+#### ADR-012: Hexagonal Architecture / DDD layer split (2026-03-05)
+
+- **Context**:
+  - Po wprowadzeniu opaque types, Zod/Pydantic i portów (ADR-011), logika domenowa, aplikacyjna i infrastrukturalna nadal przebywała w tych samych plikach. Brak fizycznej separacji warstw utrudniał testowanie use-case'ów bez frameworków i adaptorów.
+  - Plan wymagał pełnego podziału na `domain/`, `application/`, `infrastructure/`, `interfaces/` w obu serwisach.
+- **Decision**:
+  - **Python (`biometric-proxy/app/`):**
+    - `domain/` — czyste modele (`StressSnapshot`, `COOLDOWN_PERIOD`) i hierarchia wyjątków.
+    - `application/` — porty (Protocol-based: `AlertPublisherPort`, `ClockPort`, `StressProvider`) i use-case'y (`DecisionWorker`).
+    - `infrastructure/` — adaptery: Garmin, node-gateway HTTP publisher, `SystemClock`, `Settings`.
+    - `interfaces/http/` — composition root (FastAPI + lifespan + DI wiring).
+  - **Node (`node-gateway/src/`):**
+    - `domain.ts` — opaque types.
+    - `application/` — porty i use-case'y (`internalApi`, `outboxProcessor`).
+    - `infrastructure/` — persistence (pg), httpClient (node-fetch), config (Zod).
+    - `interfaces/` — thin adapters (Fastify, Telegraf).
+    - `index.ts` → composition root.
+  - Backward-compat re-exports w obu serwisach (stare ścieżki importów działają).
+  - Contract tests oparte o `contracts/internal-api.openapi.yaml`.
+- **Consequences**:
+  - `domain/` i `application/` mają zero importów frameworkowych — testowalność bez mocków infrastruktury.
+  - Contract tests zapobiegają driftowi kontraktu między serwisami.
+  - Backward-compat re-exports umożliwiają etapową migrację.
+
+---
